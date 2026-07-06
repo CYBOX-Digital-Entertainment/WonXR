@@ -290,18 +290,49 @@ h1 {
   bottom: calc(env(safe-area-inset-bottom) + 74px);
   z-index: 12;
   width: min(230px, calc(100vw - 24px));
-  margin: 0;
   padding: 9px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   background: rgba(9, 12, 15, 0.76);
   color: #dbeafe;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
+.debug-toggle {
+  min-height: 28px;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.debug-panel pre {
+  max-height: 44vh;
+  margin: 0;
+  overflow: auto;
+  color: #dbeafe;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 0.66rem;
   line-height: 1.35;
   white-space: pre-wrap;
-  pointer-events: none;
-  backdrop-filter: blur(12px);
+}
+
+.debug-panel.collapsed pre {
+  display: none;
+}
+
+.debug-panel.collapsed {
+  width: auto;
+}
+
+.debug-panel.collapsed .debug-toggle {
+  margin-bottom: 0;
 }
 
 .section-card {
