@@ -24,6 +24,7 @@ body,
 
 body {
   overflow: hidden;
+  touch-action: none;
 }
 
 button {
@@ -45,6 +46,8 @@ button {
   height: 100dvh;
   overflow: hidden;
   background: transparent;
+  pointer-events: auto;
+  touch-action: none;
 }
 
 .ar-container canvas,
@@ -54,6 +57,14 @@ button {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
+  touch-action: none;
+}
+
+.ar-container canvas {
+  pointer-events: auto;
+}
+
+.ar-container video {
   pointer-events: none;
 }
 
@@ -69,7 +80,8 @@ button {
   position: absolute !important;
   inset: 0 !important;
   z-index: 2 !important;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: none;
 }
 
 .ui-overlay {
@@ -266,7 +278,9 @@ h1 {
 }
 
 .debug-overlay.hidden,
-.debug-panel.hidden {
+.debug-panel.hidden,
+.debug-fab.hidden,
+.debug-panel.user-hidden {
   display: none;
 }
 
@@ -286,22 +300,61 @@ h1 {
 
 .debug-panel {
   position: absolute;
-  left: 12px;
-  bottom: calc(env(safe-area-inset-bottom) + 74px);
-  z-index: 12;
-  width: min(230px, calc(100vw - 24px));
+  top: calc(env(safe-area-inset-top) + 54px);
+  right: 12px;
+  z-index: 30;
+  width: min(360px, 88vw);
+  max-width: 88vw;
+  max-height: 45vh;
+  max-height: 45dvh;
+  overflow: hidden;
   padding: 9px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  background: rgba(9, 12, 15, 0.76);
+  background: rgba(0, 0, 0, 0.72);
   color: #dbeafe;
   pointer-events: auto;
   backdrop-filter: blur(12px);
 }
 
-.debug-toggle {
+.debug-fab {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 12px);
+  right: 12px;
+  z-index: 31;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: #f8fafc;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 0.74rem;
+  font-weight: 850;
+  cursor: pointer;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
+.debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.debug-header strong {
+  font-size: 0.74rem;
+}
+
+.debug-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.debug-toggle,
+.debug-hide {
   min-height: 28px;
-  margin: 0 0 8px;
   padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 6px;
@@ -313,7 +366,7 @@ h1 {
 }
 
 .debug-panel pre {
-  max-height: 44vh;
+  max-height: calc(45dvh - 54px);
   margin: 0;
   overflow: auto;
   color: #dbeafe;
@@ -328,10 +381,10 @@ h1 {
 }
 
 .debug-panel.collapsed {
-  width: auto;
+  width: min(190px, 88vw);
 }
 
-.debug-panel.collapsed .debug-toggle {
+.debug-panel.collapsed .debug-header {
   margin-bottom: 0;
 }
 

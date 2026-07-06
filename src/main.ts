@@ -15,11 +15,12 @@ const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
 const HIT_AREA_PADDING = 0.012;
-const ELEVATION_Z = 0.035;
+const ELEVATION_Z = 0.03;
 const MAX_ELEVATION_Z = 0.055;
-const BOX_DEPTH = 0.025;
-const FOUND_TO_EXPLORE_MS = 300;
-const MIN_FOUND_FRAMES_FOR_EXPLORE = 3;
+const BOX_DEPTH = 0.022;
+const SELECTION_ANIMATION_MS = 220;
+const FOUND_TO_EXPLORE_MS = 200;
+const MIN_FOUND_FRAMES_FOR_EXPLORE = 1;
 
 const POSITION_SMOOTHING = 0.1;
 const ROTATION_SMOOTHING = 0.1;
@@ -30,7 +31,7 @@ const SCALE_DEADBAND = 0.0015;
 const MAX_POSITION_DELTA = 0.08;
 const MAX_SCALE_DELTA = 0.1;
 const MAX_ROTATION_DELTA = 0.25;
-const LOST_HOLD_MS = 800;
+const LOST_HOLD_MS = 1000;
 const FADE_OUT_MS = 250;
 const STABLE_LOCK_FRAMES = 20;
 const LOCK_BREAK_POSITION_DELTA = 0.06;
@@ -64,7 +65,7 @@ type CalibrationField = keyof OverlayCalibration;
 
 type TrackingProfile = 'smooth' | 'responsive' | 'locked';
 
-type AppState = 'scan' | 'tracking' | 'explore' | 'holding';
+type AppState = 'scan' | 'tracking' | 'explore' | 'holding' | 'lost';
 
 type ProfileSettings = {
   positionSmoothing: number;
@@ -337,8 +338,15 @@ app.innerHTML = `
       <polyline id="debug-overlay-corners" class="debug-line debug-line-overlay" points=""></polyline>
     </svg>
 
+    <button id="debug-fab" class="debug-fab${isDebugMode ? '' : ' hidden'}" type="button">Debug</button>
     <section id="debug-panel" class="debug-panel${isDebugMode ? '' : ' hidden'}">
-      <button id="debug-toggle" class="debug-toggle" type="button">Debug</button>
+      <div class="debug-header">
+        <strong>Debug</strong>
+        <div class="debug-actions">
+          <button id="debug-toggle" class="debug-toggle" type="button">Collapse</button>
+          <button id="debug-hide" class="debug-hide" type="button">Hide</button>
+        </div>
+      </div>
       <pre id="debug-content"></pre>
     </section>
 
@@ -381,8 +389,10 @@ const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
 const message = requireElement<HTMLParagraphElement>('#message');
 const calibrationValues = requireElement<HTMLSpanElement>('#calibration-values');
+const debugFab = requireElement<HTMLButtonElement>('#debug-fab');
 const debugPanel = requireElement<HTMLElement>('#debug-panel');
 const debugToggle = requireElement<HTMLButtonElement>('#debug-toggle');
+const debugHide = requireElement<HTMLButtonElement>('#debug-hide');
 const debugContent = requireElement<HTMLPreElement>('#debug-content');
 const debugOverlay = requireElement<SVGSVGElement>('#debug-overlay');
 const debugTargetCorners = requireElement<SVGPolylineElement>('#debug-target-corners');
@@ -414,6 +424,22 @@ let lastErrorMessage = '';
 let lastTouchWarning = '';
 let currentFps = 0;
 let lastFrameAt = performance.now();
+let loadedSectionCount = 0;
+const hitMeshes: THREE.Mesh[] = [];
+
+const interactionDebug = {
+  pointerDownCount: 0,
+  lastPointerX: Number.NaN,
+  lastPointerY: Number.NaN,
+  lastPointerIgnoredByUi: false,
+  lastPointerIgnoredReason: '',
+  lastPointerNdcX: Number.NaN,
+  lastPointerNdcY: Number.NaN,
+  lastRaycastHitCount: 0,
+  lastHitSectionId: '',
+  lastHitSectionTitle: '',
+  lastPointerMessage: '',
+};
 
 const debugAssetPaths = [
   TARGET_MIND_V2_PATH,
@@ -492,7 +518,7 @@ function setUiCompact(isCompact: boolean) {
 
 function setAppState(nextState: AppState, status: string, tone: StatusTone, detail: string) {
   currentAppState = nextState;
-  const isCompact = nextState !== 'scan';
+  const isCompact = nextState === 'tracking' || nextState === 'explore' || nextState === 'holding';
   setUiCompact(isCompact);
   introTitle.textContent = isCompact ? 'WonXR' : '교리도 그림을 비춰주세요';
   setStatus(status, tone, detail);
@@ -775,6 +801,18 @@ function updateDebugPanel(stats: PoseStats) {
     `active section: ${stats.activeSectionId || '-'} ${stats.activeSectionTitle || ''}`,
     `last touched: ${stats.lastTouchedSectionId || '-'} ${stats.lastTouchedSectionTitle || ''}`,
     '',
+    '[interaction]',
+    `pointerdown count: ${interactionDebug.pointerDownCount}`,
+    `last pointer: ${formatDebugNumber(interactionDebug.lastPointerX)}, ${formatDebugNumber(interactionDebug.lastPointerY)}`,
+    `ignored by UI: ${interactionDebug.lastPointerIgnoredByUi ? 'yes' : 'no'} ${interactionDebug.lastPointerIgnoredReason || ''}`,
+    `pointer ndc: ${formatDebugNumber(interactionDebug.lastPointerNdcX)}, ${formatDebugNumber(interactionDebug.lastPointerNdcY)}`,
+    `loaded sections: ${loadedSectionCount}`,
+    `hit meshes: ${stats.hitMeshCount}`,
+    `last raycast hits: ${interactionDebug.lastRaycastHitCount}`,
+    `last hit section: ${interactionDebug.lastHitSectionId || '-'} ${interactionDebug.lastHitSectionTitle || ''}`,
+    `active section: ${stats.activeSectionId || '-'} ${stats.activeSectionTitle || ''}`,
+    `pointer note: ${interactionDebug.lastPointerMessage || '-'}`,
+    '',
     '[tracking]',
     `found count: ${stats.foundCount}`,
     `lost count: ${stats.lostCount}`,
@@ -785,7 +823,6 @@ function updateDebugPanel(stats: PoseStats) {
     `deadband: ${deadbandSettings.position}/${deadbandSettings.rotation}/${deadbandSettings.scale}`,
     `hold: ${stats.holdMs}ms`,
     `elevation: ${selectionElevation}`,
-    `hit meshes: ${stats.hitMeshCount}`,
     '',
     '[pose]',
     `raw center: ${formatDebugNumber(stats.rawCenterX)}, ${formatDebugNumber(stats.rawCenterY)}`,
@@ -949,7 +986,7 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
   const group = new THREE.Group();
   const debugGroup = new THREE.Group();
   const hitGroup = new THREE.Group();
-  const hitMeshes: THREE.Mesh[] = [];
+  const sectionHitMeshes: THREE.Mesh[] = [];
   debugGroup.visible = isHotspotMode;
 
   sections.forEach((section, index) => {
@@ -984,7 +1021,7 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
     hitMesh.renderOrder = 30;
     hitMesh.userData.section = section;
     hitGroup.add(hitMesh);
-    hitMeshes.push(hitMesh);
+    sectionHitMeshes.push(hitMesh);
 
     const halfWidth = width / 2;
     const halfHeight = height / 2;
@@ -1014,47 +1051,79 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
   group.add(hitGroup);
   group.add(debugGroup);
 
-  return { group, hitMeshes };
+  return { group, hitMeshes: sectionHitMeshes };
 }
 
 function setupHotspotPointer(
   camera: THREE.Camera,
   hitMeshes: THREE.Mesh[],
-  isStableVisible: () => boolean,
+  isInteractionEnabled: () => boolean,
   onSelect: (section: DoctrineSection) => void,
 ) {
-  if (hitMeshes.length === 0) {
-    return;
-  }
-
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
   window.addEventListener(
     'pointerdown',
     (event) => {
+      interactionDebug.pointerDownCount += 1;
+      interactionDebug.lastPointerX = event.clientX;
+      interactionDebug.lastPointerY = event.clientY;
+      interactionDebug.lastPointerIgnoredByUi = false;
+      interactionDebug.lastPointerIgnoredReason = '';
+      interactionDebug.lastRaycastHitCount = 0;
+      interactionDebug.lastPointerMessage = '';
+      pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+      interactionDebug.lastPointerNdcX = pointer.x;
+      interactionDebug.lastPointerNdcY = pointer.y;
       const target = event.target;
 
-      if (target instanceof Element && target.closest('.calibration-panel, .section-card, button')) {
+      if (target instanceof Element && target.closest('.debug-panel, .debug-fab, .calibration-panel, .section-card, button')) {
+        interactionDebug.lastPointerIgnoredByUi = true;
+        interactionDebug.lastPointerIgnoredReason = 'ui control';
+        interactionDebug.lastPointerMessage = 'ignored: UI';
+        lastTouchWarning = 'UI blocking touch';
         return;
       }
 
-      if (!isStableVisible()) {
+      if (!isInteractionEnabled()) {
+        interactionDebug.lastPointerMessage = 'ignored: interaction disabled';
+        lastTouchWarning = 'interaction disabled: no target pose visible';
         return;
       }
 
-      pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+      for (const mesh of hitMeshes) {
+        mesh.updateWorldMatrix(true, false);
+      }
+
       raycaster.setFromCamera(pointer, camera);
 
-      const [hit] = raycaster.intersectObjects(hitMeshes, false);
+      const hits = raycaster.intersectObjects(hitMeshes, false);
+      interactionDebug.lastRaycastHitCount = hits.length;
+      const [hit] = hits;
       const section = hit?.object.userData.section as DoctrineSection | undefined;
 
       if (!section) {
-        lastTouchWarning = 'touch raycast found no hit mesh';
+        interactionDebug.lastHitSectionId = '';
+        interactionDebug.lastHitSectionTitle = '';
+        interactionDebug.lastPointerMessage = hitMeshes.length === 0 ? 'no hit meshes' : 'no hotspot hit';
+        lastTouchWarning = hitMeshes.length === 0 ? 'No hotspot hit meshes created' : 'no raycast hits after touch';
+        console.log('WonXR hotspot pointer no hit', {
+          x: event.clientX,
+          y: event.clientY,
+          ndcX: pointer.x,
+          ndcY: pointer.y,
+          hitMeshes: hitMeshes.length,
+          hits: hits.length,
+          appState: currentAppState,
+        });
         return;
       }
 
       lastTouchWarning = '';
+      interactionDebug.lastHitSectionId = section.id;
+      interactionDebug.lastHitSectionTitle = section.title;
+      interactionDebug.lastPointerMessage = 'hit';
       console.log('WonXR hotspot selected', { id: section.id, title: section.title });
       onSelect(section);
     },
@@ -1086,7 +1155,7 @@ function createSelectionGroup(section: DoctrineSection) {
   const boxMaterial = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.28,
     depthTest: false,
     depthWrite: false,
   });
@@ -1128,7 +1197,7 @@ function updateSelectionAnimation() {
   }
 
   const startTime = Number(selectionGroup.userData.startTime ?? performance.now());
-  const progress = Math.min((performance.now() - startTime) / 250, 1);
+  const progress = Math.min((performance.now() - startTime) / SELECTION_ANIMATION_MS, 1);
   const easedProgress = 1 - (1 - progress) ** 3;
   selectionGroup.position.z = THREE.MathUtils.lerp(0.006, selectionElevation, easedProgress);
   const scale = THREE.MathUtils.lerp(0.98, 1, easedProgress);
@@ -1161,8 +1230,9 @@ function clearSelectedSection(updateStatus = true) {
   selectionGroup = undefined;
 
   if (updateStatus) {
-    const status = currentAppState === 'scan' ? '다시 교리도를 비춰주세요' : '구역을 터치해 설명을 확인하세요';
-    setStatus(status, currentAppState === 'scan' ? 'waiting' : 'found', '구역을 터치해 설명을 확인하세요');
+    const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'lost';
+    const status = isLostOrScanning ? '다시 교리도를 비춰주세요' : '구역을 터치해 설명을 확인하세요';
+    setStatus(status, isLostOrScanning ? 'waiting' : 'found', '구역을 터치해 설명을 확인하세요');
   }
 }
 
@@ -1202,7 +1272,7 @@ async function startAR() {
   lastErrorMessage = '';
   startButton.disabled = true;
   startButton.textContent = '카메라 준비 중';
-  setAppState('scan', '인식 대기', 'ready', '카메라 권한을 요청합니다.');
+  setAppState('scan', '교리도 전체가 화면에 들어오게 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
 
   try {
     const [overlayTexture, doctrineSections, targetMind] = await Promise.all([
@@ -1217,6 +1287,7 @@ async function startAR() {
       sections: doctrineSections.length,
     });
     activeTargetVersion = targetMind.version;
+    loadedSectionCount = doctrineSections.length;
 
     mindarThree = new MindARThree({
       container: arContainer,
@@ -1328,14 +1399,13 @@ async function startAR() {
     overlayPlane.renderOrder = 10;
     overlayContentGroup.add(overlayPlane);
     const { group: hotspotDebugGroup, hitMeshes: hotspotHitMeshes } = createHotspotDebugGroup(doctrineSections);
-    poseStats.hitMeshCount = hotspotHitMeshes.length;
+    hitMeshes.splice(0, hitMeshes.length, ...hotspotHitMeshes);
+    poseStats.hitMeshCount = hitMeshes.length;
     overlayContentGroup.add(hotspotDebugGroup);
     setupHotspotPointer(
       camera,
-      hotspotHitMeshes,
-      () =>
-        stableGroup.visible &&
-        (currentAppState === 'tracking' || currentAppState === 'explore' || currentAppState === 'holding'),
+      hitMeshes,
+      () => isTargetFound || stableGroup.visible || currentAppState === 'holding',
       selectSection,
     );
     applyOverlayCalibration();
@@ -1348,7 +1418,7 @@ async function startAR() {
       foundAt = now;
       lastSeenAt = now;
       stableGroup.visible = hasLastGoodPose;
-      setAppState('tracking', '인식됨', 'found', '구역을 터치해 설명을 확인하세요');
+      setAppState('tracking', '구역을 터치해 설명을 확인하세요', 'found', '구역을 터치해 설명을 확인하세요');
     };
 
     anchor.onTargetLost = () => {
@@ -1356,7 +1426,7 @@ async function startAR() {
       poseStats.lostCount += 1;
 
       if (stableGroup.visible) {
-        setAppState('holding', '인식 끊김  유지 중', 'found', '조금 더 위에서 비춰주세요');
+        setAppState('holding', '인식 유지 중  구역을 터치할 수 있습니다', 'found', '조금 더 위에서 비춰주세요');
       }
     };
 
@@ -1365,7 +1435,7 @@ async function startAR() {
     assertArLayersCreated();
 
     startButton.classList.add('hidden');
-    setAppState('scan', '인식 대기', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
+    setAppState('scan', '교리도 전체가 화면에 들어오게 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
 
     renderer.setAnimationLoop(() => {
       const now = performance.now();
@@ -1496,18 +1566,17 @@ async function startAR() {
           overlayOpacity = Math.max(overlayOpacity, 1);
 
           if (!isTargetFound && currentAppState !== 'holding') {
-            setAppState('holding', '인식 끊김  유지 중', 'found', '조금 더 위에서 비춰주세요');
+            setAppState('holding', '인식 유지 중  구역을 터치할 수 있습니다', 'found', '조금 더 위에서 비춰주세요');
           }
         } else {
-          const fadeProgress = fadeOutMs > 0 ? Math.min((elapsedSinceGoodPose - lostHoldMs) / fadeOutMs, 1) : 1;
-          overlayOpacity = Math.max(1 - fadeProgress, 0);
+          overlayOpacity = 0;
+          stableGroup.visible = false;
+          isStableInitialized = false;
+          hasLastGoodPose = false;
+          clearSelectedSection(false);
 
-          if (overlayOpacity <= 0) {
-            stableGroup.visible = false;
-            isStableInitialized = false;
-            hasLastGoodPose = false;
-            clearSelectedSection(false);
-            setAppState('scan', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
+          if (currentAppState !== 'lost') {
+            setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
           }
         }
       }
@@ -1533,7 +1602,11 @@ async function startAR() {
         viewingAngleDeg > 65 && stableGroup.visible ? 'viewing angle too low' : '',
         !overlayTexture ? 'overlay not loaded' : '',
         doctrineSections.length === 0 ? 'doctrine_sections.json not loaded' : '',
-        hotspotHitMeshes.length === 0 ? 'no hotspot hit meshes' : '',
+        hitMeshes.length === 0 ? 'no hotspot hit meshes' : '',
+        interactionDebug.pointerDownCount > 0 && interactionDebug.lastRaycastHitCount === 0 && !interactionDebug.lastPointerIgnoredByUi
+          ? 'no raycast hits after touch'
+          : '',
+        interactionDebug.lastPointerIgnoredByUi ? 'UI blocking touch' : '',
         lastTouchWarning,
       ].filter(Boolean);
 
@@ -1554,6 +1627,7 @@ async function startAR() {
       poseStats.targetVersion = activeTargetVersion;
       poseStats.fallbackUsed = activeTargetFallbackUsed;
       poseStats.holdRemainingMs = holdRemainingMs;
+      poseStats.hitMeshCount = hitMeshes.length;
       poseStats.activeSectionId = activeSectionId;
       poseStats.activeSectionTitle = activeSectionTitle;
       poseStats.lastTouchedSectionId = lastTouchedSectionId;
@@ -1644,6 +1718,15 @@ sectionCardClose.addEventListener('click', () => {
 
 debugToggle.addEventListener('click', () => {
   debugPanel.classList.toggle('collapsed');
+  debugToggle.textContent = debugPanel.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+});
+
+debugHide.addEventListener('click', () => {
+  debugPanel.classList.add('user-hidden');
+});
+
+debugFab.addEventListener('click', () => {
+  debugPanel.classList.remove('user-hidden');
 });
 
 window.addEventListener('beforeunload', () => {
