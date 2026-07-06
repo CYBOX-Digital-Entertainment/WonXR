@@ -21,15 +21,13 @@ https://cybox-digital-entertainment.github.io/WonXR/?mode=debug
 
 ## User Test Flow
 
-1. v2 패턴이 들어간 교리도 출력물을 책상이나 클립보드 위에 평평하게 둡니다.
-2. Main demo를 iPhone Safari 또는 Android Chrome/Samsung Internet에서 엽니다.
+1. 교리도를 책상이나 클립보드 위에 평평하게 둡니다.
+2. 위 링크를 iPhone Safari 또는 Android Chrome/Samsung Internet에서 엽니다.
 3. 카메라 권한을 허용합니다.
-4. 중앙의 empty 교리도 기준 흑백 pulsing guide에 교리도 전체를 맞춥니다.
+4. 중앙의 실제 교리도에다 화면 내 가상 교리도 위치를 맞춰 인식시킵니다.
 5. 인식 후에도 인쇄된 교리도가 카메라 화면 안에 계속 보이도록 유지합니다.
-6. 원하는 구역을 터치합니다.
-7. 선택 구역의 raised 3D block과 하단 설명 카드가 나타나는지 확인합니다.
-8. 인식이 끊기면 `다시 스캔`을 누르고 교리도를 다시 화면 안에 맞춥니다.
-9. 3D 느낌은 20-35도 정도의 완만한 각도에서 확인하고, 너무 낮은 측면 각도는 피합니다.
+6. 인식이 끊기면 `다시 스캔`을 누르고 교리도를 다시 화면 안에 맞춥니다.
+5. 3D 느낌은 20-35도 정도의 완만한 각도에서 확인하고, 너무 낮은 측면 각도는 피합니다.
 
 ## iPhone Home Screen
 
