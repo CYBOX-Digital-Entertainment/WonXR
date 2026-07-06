@@ -1,0 +1,39 @@
+{
+  "version": "v2-margin-safe",
+  "baseImage": "gyorido_empty.png",
+  "imageWidth": 1000,
+  "imageHeight": 1415,
+  "patternOverlay": "gyorido_empty_v2_margin_safe_pattern_overlay.png",
+  "printAndCompileImage": "gyorido_empty_v2_margin_safe.png",
+  "markerPositions": [
+    {
+      "label": "A",
+      "x": 28,
+      "y": 145,
+      "size": 58,
+      "variant": 1
+    },
+    {
+      "label": "B",
+      "x": 914,
+      "y": 145,
+      "size": 58,
+      "variant": 2
+    },
+    {
+      "label": "C",
+      "x": 28,
+      "y": 1327,
+      "size": 58,
+      "variant": 3
+    },
+    {
+      "label": "D",
+      "x": 914,
+      "y": 1327,
+      "size": 58,
+      "variant": 4
+    }
+  ],
+  "note": "Patterns are placed only in outer white margins to avoid overlapping the doctrine diagram."
+}

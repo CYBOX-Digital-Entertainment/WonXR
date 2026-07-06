@@ -59,17 +59,50 @@ https://cybox-digital-entertainment.github.io/WonXR/?ox=0.01&oy=-0.02&sx=1.02&sy
 스무딩 조정 예시:
 
 ```text
-https://cybox-digital-entertainment.github.io/WonXR/?ps=0.12&rs=0.12&ss=0.12&hold=600
+https://cybox-digital-entertainment.github.io/WonXR/?ps=0.10&rs=0.10&ss=0.10&hold=800
 ```
 
 - `ps`: 위치 보간 계수
 - `rs`: 회전 보간 계수
 - `ss`: 스케일 보간 계수
+- `pdb`: 위치 deadband
+- `rdb`: 회전 deadband
+- `sdb`: 스케일 deadband
+- `mpd`: 한 프레임 최대 위치 변화 허용값
+- `msd`: 한 프레임 최대 스케일 변화 허용값
+- `mrd`: 한 프레임 최대 회전 변화 허용값, 라디안 단위
 - `hold`: 타깃을 잠깐 놓쳤을 때 오버레이를 유지하는 시간, 밀리초 단위
 - `mincf`: MindAR filterMinCF
 - `beta`: MindAR filterBeta
 - `warmup`: MindAR warmupTolerance
 - `miss`: MindAR missTolerance
+- `lock`: `1`이면 고정 시연 모드를 활성화
+- `profile`: `smooth`, `responsive`, `locked`
+
+추적 안정화 테스트 URL:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?profile=smooth
+https://cybox-digital-entertainment.github.io/WonXR/?profile=locked&lock=1
+```
+
+hotspot 디버그:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?hotspots=1
+```
+
+전체 디버그:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?debug=1&hotspots=1
+```
+
+수동 보정 + 디버그:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?cal=1&debug=1
+```
 
 디버그 모드:
 
@@ -84,7 +117,7 @@ https://cybox-digital-entertainment.github.io/WonXR/?debug=1
 outlier 판정값도 URL로 조정할 수 있습니다.
 
 ```text
-https://cybox-digital-entertainment.github.io/WonXR/?debug=1&scaleOutlier=0.15&rotOutlier=10&posOutlier=0.1
+https://cybox-digital-entertainment.github.io/WonXR/?debug=1&mpd=0.08&msd=0.10&mrd=0.25
 ```
 
 ## GitHub Pages 배포
@@ -105,6 +138,8 @@ https://cybox-digital-entertainment.github.io/WonXR/?debug=1&scaleOutlier=0.15&r
 
 ```text
 public/
+  data/
+    doctrine_sections.json
   targets/
     gyorido_empty.png
     gyorido_empty.mind
@@ -124,5 +159,7 @@ vite.config.ts
 - 오버레이 평면은 MindAR 타깃 폭 `1`, 높이 `1.415`로 표시합니다.
 - 투명 PNG를 그대로 사용하며 리사이즈나 크롭은 하지 않습니다.
 - 현재 기본 타깃 파일은 `public/targets/gyorido_empty.mind`입니다. 코드에서는 `TARGET_MIND_PATH` 상수로 분리되어 있어 이후 `gyorido_empty_v2.mind`로 쉽게 바꿀 수 있습니다.
+- `?target=v2`를 붙이면 `public/targets/gyorido_empty_v2.mind`를 먼저 시도하고, 파일이 없으면 기본 `gyorido_empty.mind`로 fallback합니다.
 - 현재 `gyorido_empty.png`는 빈 공간이 많아 추적 jitter가 있을 수 있습니다. 필요하면 비대칭 마커가 추가된 `gyorido_empty_v2.png`를 새로 프린트하고 MindAR 컴파일러로 `gyorido_empty_v2.mind`를 생성해 교체합니다.
+- v0.2 precise hotspot 데이터는 `public/data/doctrine_sections.json`에 있습니다. `?hotspots=1`에서만 AR 위에 hotspot debug 사각형과 라벨을 표시합니다.
 - `mind-ar` 패키지는 브라우저 실행에 필요 없는 `canvas` 네이티브 빌드 의존성을 포함합니다. Windows/Node 22 환경에서 설치 실패가 날 수 있어 프로젝트 `.npmrc`에서 설치 스크립트를 건너뛰도록 설정했습니다.

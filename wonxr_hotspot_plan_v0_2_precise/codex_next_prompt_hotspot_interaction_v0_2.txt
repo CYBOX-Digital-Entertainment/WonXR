@@ -1,0 +1,36 @@
+현재 프로젝트 경로는 C:\Users\minsi\VSC_Projects\WonXR 이다.
+새 하위 폴더를 만들지 말고 현재 프로젝트를 수정하라.
+
+목표:
+교리도 AR에서 구역별 터치/하이라이트/설명 카드 기능을 추가한다.
+이번에는 v0.2 precise hotspot 데이터를 사용한다.
+
+사용할 파일:
+- public/data/doctrine_sections.json
+  또는 이 ZIP의 doctrine_sections_v0_2_precise.json을 public/data/doctrine_sections.json으로 복사해서 사용한다.
+- 참고 이미지: gyorido_hotspot_plan_v0_2_precise_numbered.png
+- legend: hotspot_legend_v0_2.png
+
+요구사항:
+1. doctrine_sections.json을 fetch로 로드한다.
+2. sections[].hotspot의 normalized 좌표 nx, ny, nw, nh를 우선 사용한다.
+3. 시각 하이라이트는 precise 좌표 그대로 사용한다.
+4. 터치 판정은 모바일 조작성 때문에 hitAreaPadding을 별도로 둘 수 있게 한다.
+   - 기본 hitAreaPadding = 0.01
+   - ?hitpad=0.02 식으로 조정 가능하게 한다.
+5. 사용자가 구역을 터치하면:
+   - 해당 구역 위에 반투명 하이라이트 plane을 표시한다.
+   - 해당 구역이 얇은 3D 패널처럼 살짝 떠오르는 효과를 준다.
+   - 화면 하단 또는 우측에 HTML 설명 카드를 표시한다.
+6. 설명 카드에는 title, subtitle, children, content를 표시한다.
+7. content가 "작성 예정"이어도 그대로 표시한다.
+8. ?hotspots=1 쿼리 모드에서는 모든 hotspot 테두리와 번호 또는 제목을 표시한다.
+9. ?edit=1 실시간 좌표 편집 모드는 다음 단계로 남겨도 된다.
+10. GLB/Max 모델을 추가하지 말고 Three.js Plane/Box/Line으로 먼저 구현한다.
+11. iPhone Safari와 Android Chrome 터치 이벤트를 모두 고려한다.
+12. npm run build가 성공해야 한다.
+
+주의:
+- 기존 AR 오버레이/안정화 기능을 깨뜨리지 말라.
+- gyorido_text_overlay.png 표시 기능은 유지한다.
+- 구역 좌표는 1000x1415 원본 이미지 기준이다.

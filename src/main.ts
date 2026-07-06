@@ -3,7 +3,9 @@ import * as THREE from 'three';
 import { MindARThree } from 'mind-ar/dist/mindar-image-three.prod.js';
 
 const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
+const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
 const OVERLAY_IMAGE_PATH = 'overlays/gyorido_text_overlay.png';
+const HOTSPOT_DATA_PATH = 'data/doctrine_sections.json';
 const TARGET_WIDTH = 1;
 const TARGET_HEIGHT = 1415 / 1000;
 
@@ -13,25 +15,34 @@ const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
 
-const POSITION_SMOOTHING = 0.15;
-const ROTATION_SMOOTHING = 0.15;
-const SCALE_SMOOTHING = 0.15;
-const LOST_HOLD_MS = 400;
+const POSITION_SMOOTHING = 0.1;
+const ROTATION_SMOOTHING = 0.1;
+const SCALE_SMOOTHING = 0.1;
+const POSITION_DEADBAND = 0.0015;
+const ROTATION_DEADBAND = 0.0015;
+const SCALE_DEADBAND = 0.0015;
+const MAX_POSITION_DELTA = 0.08;
+const MAX_SCALE_DELTA = 0.1;
+const MAX_ROTATION_DELTA = 0.25;
+const LOST_HOLD_MS = 800;
 const FADE_OUT_MS = 250;
-const SCALE_OUTLIER_RATIO = 0.15;
-const ROTATION_OUTLIER_DEG = 10;
-const POSITION_OUTLIER_RATIO = 0.1;
+const STABLE_LOCK_FRAMES = 20;
+const LOCK_BREAK_POSITION_DELTA = 0.06;
+const LOCK_BREAK_ROTATION_DELTA = 0.2;
 
 const TRACKING_FILTER_MIN_CF = 0.001;
-const TRACKING_FILTER_BETA = 50;
+const TRACKING_FILTER_BETA = 30;
 const TRACKING_WARMUP_TOLERANCE = 5;
-const TRACKING_MISS_TOLERANCE = 10;
+const TRACKING_MISS_TOLERANCE = 12;
 
 const CALIBRATION_STORAGE_KEY = 'wonxr-overlay-calibration';
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
 const queryParams = new URLSearchParams(window.location.search);
 const isCalibrationMode = queryParams.get('cal') === '1';
 const isDebugMode = queryParams.get('debug') === '1';
+const isHotspotMode = queryParams.get('hotspots') === '1';
+const requestedProfile = queryParams.get('profile');
+const trackingProfile = requestedProfile === 'responsive' || requestedProfile === 'locked' ? requestedProfile : 'smooth';
 
 type OverlayCalibration = {
   scaleX: number;
@@ -42,6 +53,35 @@ type OverlayCalibration = {
 };
 
 type CalibrationField = keyof OverlayCalibration;
+
+type TrackingProfile = 'smooth' | 'responsive' | 'locked';
+
+type ProfileSettings = {
+  positionSmoothing: number;
+  rotationSmoothing: number;
+  scaleSmoothing: number;
+  positionDeadband: number;
+  rotationDeadband: number;
+  scaleDeadband: number;
+  lostHoldMs: number;
+  lockDefault: boolean;
+};
+
+type DoctrineSection = {
+  id: string;
+  title: string;
+  color?: string;
+  hotspot: {
+    nx: number;
+    ny: number;
+    nw: number;
+    nh: number;
+  };
+};
+
+type DoctrineSectionsPayload = {
+  sections: DoctrineSection[];
+};
 
 const neutralCalibration: OverlayCalibration = {
   scaleX: OVERLAY_SCALE_X,
@@ -131,10 +171,54 @@ const overlayCalibration: OverlayCalibration = {
   rotationZ: readCalibrationValue('rotationZ', OVERLAY_ROTATION_Z),
 };
 
+const profileDefaults: Record<TrackingProfile, ProfileSettings> = {
+  smooth: {
+    positionSmoothing: POSITION_SMOOTHING,
+    rotationSmoothing: ROTATION_SMOOTHING,
+    scaleSmoothing: SCALE_SMOOTHING,
+    positionDeadband: POSITION_DEADBAND,
+    rotationDeadband: ROTATION_DEADBAND,
+    scaleDeadband: SCALE_DEADBAND,
+    lostHoldMs: LOST_HOLD_MS,
+    lockDefault: false,
+  },
+  responsive: {
+    positionSmoothing: 0.25,
+    rotationSmoothing: 0.25,
+    scaleSmoothing: 0.25,
+    positionDeadband: 0.0005,
+    rotationDeadband: 0.0005,
+    scaleDeadband: 0.0005,
+    lostHoldMs: 400,
+    lockDefault: false,
+  },
+  locked: {
+    positionSmoothing: 0.06,
+    rotationSmoothing: 0.06,
+    scaleSmoothing: 0.06,
+    positionDeadband: POSITION_DEADBAND,
+    rotationDeadband: ROTATION_DEADBAND,
+    scaleDeadband: SCALE_DEADBAND,
+    lostHoldMs: 1200,
+    lockDefault: true,
+  },
+};
+
+const activeProfileDefaults = profileDefaults[trackingProfile];
+
 const smoothingSettings = {
-  position: readUnitNumberParam('ps', POSITION_SMOOTHING),
-  rotation: readUnitNumberParam('rs', ROTATION_SMOOTHING),
-  scale: readUnitNumberParam('ss', SCALE_SMOOTHING),
+  // Lower values are smoother but respond more slowly to real camera motion.
+  position: readUnitNumberParam('ps', activeProfileDefaults.positionSmoothing),
+  // Lower values are smoother but respond more slowly to real camera motion.
+  rotation: readUnitNumberParam('rs', activeProfileDefaults.rotationSmoothing),
+  // Lower values are smoother but respond more slowly to real camera motion.
+  scale: readUnitNumberParam('ss', activeProfileDefaults.scaleSmoothing),
+};
+
+const deadbandSettings = {
+  position: readNonNegativeNumberParam('pdb', activeProfileDefaults.positionDeadband),
+  rotation: readNonNegativeNumberParam('rdb', activeProfileDefaults.rotationDeadband),
+  scale: readNonNegativeNumberParam('sdb', activeProfileDefaults.scaleDeadband),
 };
 
 const trackingSettings = {
@@ -144,17 +228,23 @@ const trackingSettings = {
   missTolerance: readNonNegativeNumberParam('miss', TRACKING_MISS_TOLERANCE),
 };
 
-const lostHoldMs = readNonNegativeNumberParam('hold', LOST_HOLD_MS);
+const lostHoldMs = readNonNegativeNumberParam('hold', activeProfileDefaults.lostHoldMs);
 const fadeOutMs = readNonNegativeNumberParam('fade', FADE_OUT_MS);
 const outlierSettings = {
-  scaleRatio: readNonNegativeNumberParam('scaleOutlier', SCALE_OUTLIER_RATIO),
-  rotationDeg: readNonNegativeNumberParam('rotOutlier', ROTATION_OUTLIER_DEG),
-  positionRatio: readNonNegativeNumberParam('posOutlier', POSITION_OUTLIER_RATIO),
+  position: readNonNegativeNumberParam('mpd', MAX_POSITION_DELTA),
+  scale: readNonNegativeNumberParam('msd', MAX_SCALE_DELTA),
+  rotation: readNonNegativeNumberParam('mrd', MAX_ROTATION_DELTA),
+};
+const lockSettings = {
+  enabled: queryParams.has('lock') ? queryParams.get('lock') === '1' : activeProfileDefaults.lockDefault,
+  stableFrames: Math.max(1, Math.round(readNonNegativeNumberParam('lockframes', STABLE_LOCK_FRAMES))),
+  breakPosition: readNonNegativeNumberParam('lbp', LOCK_BREAK_POSITION_DELTA),
+  breakRotation: readNonNegativeNumberParam('lbr', LOCK_BREAK_ROTATION_DELTA),
 };
 
 console.log('WonXR AR config', {
-  targetMindPath: TARGET_MIND_PATH,
-  targetMindUrl: assetUrl(TARGET_MIND_PATH),
+  targetMindPath: getRequestedTargetMindPath(),
+  targetMindUrl: assetUrl(getRequestedTargetMindPath()),
   overlayPath: OVERLAY_IMAGE_PATH,
   overlayUrl: assetUrl(OVERLAY_IMAGE_PATH),
   calibration: {
@@ -164,9 +254,17 @@ console.log('WonXR AR config', {
     sy: overlayCalibration.scaleY,
     rz: overlayCalibration.rotationZ,
   },
+  profile: trackingProfile,
   tracking: trackingSettings,
   smoothing: smoothingSettings,
+  deadband: deadbandSettings,
   outlier: outlierSettings,
+  lock: lockSettings,
+  hotspots: {
+    enabled: isHotspotMode,
+    dataPath: HOTSPOT_DATA_PATH,
+    dataUrl: assetUrl(HOTSPOT_DATA_PATH),
+  },
   holdMs: lostHoldMs,
   fadeOutMs,
 });
@@ -253,9 +351,13 @@ const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[
 let mindarThree: MindARThree | undefined;
 let hasStarted = false;
 let overlayPlane: THREE.Mesh | undefined;
+let activeSectionId = '';
 
 type PoseStats = {
   found: boolean;
+  locked: boolean;
+  profile: TrackingProfile;
+  holdMs: number;
   rawCenterX: number;
   rawCenterY: number;
   smoothedCenterX: number;
@@ -266,6 +368,7 @@ type PoseStats = {
   smoothedRotationDeg: number;
   rejectedFrames: number;
   lastRejectReason: string;
+  activeSectionId: string;
 };
 
 type StatusTone = 'waiting' | 'ready' | 'found' | 'error';
@@ -385,6 +488,42 @@ function assertArLayersCreated() {
   }
 }
 
+function getRequestedTargetMindPath() {
+  return queryParams.get('target') === 'v2' ? TARGET_MIND_V2_PATH : TARGET_MIND_PATH;
+}
+
+async function resolveTargetMindPath() {
+  const requestedTargetMindPath = getRequestedTargetMindPath();
+
+  if (requestedTargetMindPath === TARGET_MIND_PATH) {
+    return TARGET_MIND_PATH;
+  }
+
+  try {
+    const response = await fetch(assetUrl(requestedTargetMindPath), { method: 'HEAD' });
+
+    if (response.ok) {
+      return requestedTargetMindPath;
+    }
+  } catch (error) {
+    console.warn('Failed to check v2 target file. Falling back to default target.', error);
+  }
+
+  console.warn(`Target file not found: ${requestedTargetMindPath}. Falling back to ${TARGET_MIND_PATH}.`);
+  return TARGET_MIND_PATH;
+}
+
+async function loadDoctrineSections() {
+  const response = await fetch(assetUrl(HOTSPOT_DATA_PATH));
+
+  if (!response.ok) {
+    throw new Error(`Failed to load hotspot data: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as DoctrineSectionsPayload;
+  return Array.isArray(payload.sections) ? payload.sections : [];
+}
+
 function getScaleScalar(scale: THREE.Vector3) {
   return (Math.abs(scale.x) + Math.abs(scale.y)) / 2;
 }
@@ -416,24 +555,38 @@ function getPoseRejectReason(
     return 'invalid scale';
   }
 
-  const scaleRatio = Math.abs(rawScaleScalar / Math.max(lastGoodScaleScalar, 0.0001) - 1);
-  const rotationDeltaDeg = THREE.MathUtils.radToDeg(lastGoodQuaternion.angleTo(rawQuaternion));
+  const scaleDelta = Math.abs(rawScaleScalar / Math.max(lastGoodScaleScalar, 0.0001) - 1);
+  const rotationDelta = lastGoodQuaternion.angleTo(rawQuaternion);
   const positionDelta = rawPosition.distanceTo(lastGoodPosition);
-  const positionLimit = Math.max(TARGET_WIDTH * Math.max(lastGoodScaleScalar, 0.0001) * outlierSettings.positionRatio, 0.002);
 
-  if (scaleRatio > outlierSettings.scaleRatio) {
-    return `scale ${scaleRatio.toFixed(3)}`;
+  if (scaleDelta > outlierSettings.scale) {
+    return `scale ${scaleDelta.toFixed(3)}`;
   }
 
-  if (rotationDeltaDeg > outlierSettings.rotationDeg) {
-    return `rotation ${rotationDeltaDeg.toFixed(1)}deg`;
+  if (rotationDelta > outlierSettings.rotation) {
+    return `rotation ${rotationDelta.toFixed(3)}rad`;
   }
 
-  if (positionDelta > positionLimit) {
+  if (positionDelta > outlierSettings.position) {
     return `position ${positionDelta.toFixed(3)}`;
   }
 
   return '';
+}
+
+function getPoseDelta(
+  positionA: THREE.Vector3,
+  quaternionA: THREE.Quaternion,
+  scaleA: THREE.Vector3,
+  positionB: THREE.Vector3,
+  quaternionB: THREE.Quaternion,
+  scaleB: THREE.Vector3,
+) {
+  return {
+    position: positionA.distanceTo(positionB),
+    rotation: quaternionA.angleTo(quaternionB),
+    scale: Math.abs(getScaleScalar(scaleA) / Math.max(getScaleScalar(scaleB), 0.0001) - 1),
+  };
 }
 
 function formatDebugNumber(value: number) {
@@ -451,14 +604,19 @@ function updateDebugPanel(stats: PoseStats) {
 
   debugPanel.textContent = [
     `target: ${stats.found ? 'found' : 'lost'}`,
+    `locked: ${stats.locked ? 'yes' : 'no'}`,
+    `profile: ${stats.profile}`,
+    `ps/rs/ss: ${smoothingSettings.position}/${smoothingSettings.rotation}/${smoothingSettings.scale}`,
+    `hold: ${stats.holdMs}ms`,
     `raw center: ${formatDebugNumber(stats.rawCenterX)}, ${formatDebugNumber(stats.rawCenterY)}`,
     `smooth center: ${formatDebugNumber(stats.smoothedCenterX)}, ${formatDebugNumber(stats.smoothedCenterY)}`,
     `raw scale: ${formatDebugNumber(stats.rawScale)}`,
     `smooth scale: ${formatDebugNumber(stats.smoothedScale)}`,
     `raw rot: ${formatDebugNumber(stats.rawRotationDeg)}deg`,
     `smooth rot: ${formatDebugNumber(stats.smoothedRotationDeg)}deg`,
-    `rejected: ${stats.rejectedFrames}`,
+    `discarded: ${stats.rejectedFrames}`,
     `reason: ${stats.lastRejectReason || '-'}`,
+    `section: ${stats.activeSectionId || '-'}`,
   ].join('\n');
 }
 
@@ -533,6 +691,137 @@ async function loadOverlayTexture() {
   return texture;
 }
 
+function createLabelSprite(text: string, color: THREE.Color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Label canvas context was not available.');
+  }
+
+  context.fillStyle = 'rgba(5, 8, 12, 0.72)';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = `#${color.getHexString()}`;
+  context.lineWidth = 8;
+  context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+  context.fillStyle = '#ffffff';
+  context.font = '700 34px system-ui, -apple-system, Segoe UI, sans-serif';
+  context.textBaseline = 'middle';
+  context.fillText(text, 22, canvas.height / 2, canvas.width - 44);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.encoding = THREE.sRGBEncoding;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.18, 0.045, 1);
+  sprite.renderOrder = 24;
+  return sprite;
+}
+
+function createHotspotDebugGroup(sections: DoctrineSection[]) {
+  const group = new THREE.Group();
+  const hitMeshes: THREE.Mesh[] = [];
+  group.visible = isHotspotMode;
+
+  sections.forEach((section, index) => {
+    const color = new THREE.Color();
+    color.setStyle(section.color ?? '#6ee7b7');
+    const width = section.hotspot.nw * TARGET_WIDTH;
+    const height = section.hotspot.nh * TARGET_HEIGHT;
+    const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * TARGET_WIDTH;
+    const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * TARGET_HEIGHT;
+    const sectionGroup = new THREE.Group();
+    sectionGroup.position.set(centerX, centerY, 0.004);
+
+    const fillMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.08,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), fillMaterial);
+    hitMesh.renderOrder = 20;
+    hitMesh.userData.section = section;
+    sectionGroup.add(hitMesh);
+    hitMeshes.push(hitMesh);
+
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-halfWidth, halfHeight, 0.002),
+      new THREE.Vector3(halfWidth, halfHeight, 0.002),
+      new THREE.Vector3(halfWidth, -halfHeight, 0.002),
+      new THREE.Vector3(-halfWidth, -halfHeight, 0.002),
+    ]);
+    const lineMaterial = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.96,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const outline = new THREE.LineLoop(lineGeometry, lineMaterial);
+    outline.renderOrder = 22;
+    sectionGroup.add(outline);
+
+    const label = createLabelSprite(`${index + 1}. ${section.title}`, color);
+    label.position.set(0, halfHeight + 0.028, 0.006);
+    sectionGroup.add(label);
+    group.add(sectionGroup);
+  });
+
+  return { group, hitMeshes };
+}
+
+function setupHotspotPointer(camera: THREE.Camera, hitMeshes: THREE.Mesh[], isStableVisible: () => boolean) {
+  if (!isHotspotMode || hitMeshes.length === 0) {
+    return;
+  }
+
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  window.addEventListener(
+    'pointerdown',
+    (event) => {
+      const target = event.target;
+
+      if (target instanceof Element && target.closest('.calibration-panel, button')) {
+        return;
+      }
+
+      if (!isStableVisible()) {
+        return;
+      }
+
+      pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+      raycaster.setFromCamera(pointer, camera);
+
+      const [hit] = raycaster.intersectObjects(hitMeshes, false);
+      const section = hit?.object.userData.section as DoctrineSection | undefined;
+
+      if (!section) {
+        return;
+      }
+
+      activeSectionId = section.id;
+      console.log('WonXR hotspot selected', { id: section.id, title: section.title });
+    },
+    { passive: true },
+  );
+}
+
 async function startAR() {
   if (hasStarted) {
     return;
@@ -552,14 +841,23 @@ async function startAR() {
   setUiCompact(false);
   startButton.disabled = true;
   startButton.textContent = '카메라 준비 중';
-  setStatus('다시 교리도를 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
+  setStatus('인식 대기', 'ready', '카메라 권한을 요청합니다.');
 
   try {
-    const overlayTexture = await loadOverlayTexture();
+    const [overlayTexture, doctrineSections, targetMindPath] = await Promise.all([
+      loadOverlayTexture(),
+      loadDoctrineSections(),
+      resolveTargetMindPath(),
+    ]);
+
+    console.log('WonXR target and hotspot data resolved', {
+      targetMindPath,
+      sections: doctrineSections.length,
+    });
 
     mindarThree = new MindARThree({
       container: arContainer,
-      imageTargetSrc: assetUrl(TARGET_MIND_PATH),
+      imageTargetSrc: assetUrl(targetMindPath),
       uiLoading: 'no',
       uiScanning: 'no',
       uiError: 'no',
@@ -584,6 +882,9 @@ async function startAR() {
     const lastGoodScale = new THREE.Vector3(1, 1, 1);
     const poseStats: PoseStats = {
       found: false,
+      locked: false,
+      profile: trackingProfile,
+      holdMs: lostHoldMs,
       rawCenterX: Number.NaN,
       rawCenterY: Number.NaN,
       smoothedCenterX: Number.NaN,
@@ -594,16 +895,19 @@ async function startAR() {
       smoothedRotationDeg: Number.NaN,
       rejectedFrames: 0,
       lastRejectReason: '',
+      activeSectionId: '',
     };
 
     let isTargetFound = false;
     let isStableInitialized = false;
     let hasLastGoodPose = false;
+    let isPoseLocked = false;
+    let stableFrameCount = 0;
     let lastGoodScaleScalar = 1;
     let overlayOpacity = 0;
     let lastSeenAt = 0;
     let foundAt = 0;
-    let statusMode: 'waiting' | 'smoothing' | 'found' = 'waiting';
+    let statusMode: 'waiting' | 'smoothing' | 'found' | 'locked' = 'waiting';
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
@@ -624,6 +928,9 @@ async function startAR() {
     overlayPlane = new THREE.Mesh(overlayGeometry, overlayMaterial);
     overlayPlane.renderOrder = 10;
     stableGroup.add(overlayPlane);
+    const { group: hotspotDebugGroup, hitMeshes: hotspotHitMeshes } = createHotspotDebugGroup(doctrineSections);
+    overlayPlane.add(hotspotDebugGroup);
+    setupHotspotPointer(camera, hotspotHitMeshes, () => stableGroup.visible);
     applyOverlayCalibration();
 
     anchor.onTargetFound = () => {
@@ -642,7 +949,7 @@ async function startAR() {
 
       if (stableGroup.visible) {
         statusMode = 'smoothing';
-        setStatus('인식됨  안정화 중', 'found', '순간적인 추적 끊김을 보정하고 있습니다.');
+        setStatus('인식 끊김  유지 중', 'found', '순간적인 추적 끊김을 보정하고 있습니다.');
       }
     };
 
@@ -650,7 +957,7 @@ async function startAR() {
     assertArLayersCreated();
 
     startButton.classList.add('hidden');
-    setStatus('다시 교리도를 비춰주세요', 'waiting', '카메라 화면 안에 교리도 그림이 들어오도록 맞춰주세요.');
+    setStatus('인식 대기', 'waiting', '카메라 화면 안에 교리도 그림이 들어오도록 맞춰주세요.');
 
     renderer.setAnimationLoop(() => {
       const now = performance.now();
@@ -701,19 +1008,65 @@ async function startAR() {
           stableGroup.quaternion.copy(lastGoodQuaternion);
           stableGroup.scale.copy(lastGoodScale);
           isStableInitialized = true;
+          stableFrameCount = 0;
           overlayOpacity = 1;
         } else if (acceptedPose) {
-          stableGroup.position.lerp(lastGoodPosition, smoothingSettings.position);
-          stableGroup.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
-          stableGroup.scale.lerp(lastGoodScale, smoothingSettings.scale);
-          overlayOpacity += (1 - overlayOpacity) * 0.25;
+          const stableDelta = getPoseDelta(
+            lastGoodPosition,
+            lastGoodQuaternion,
+            lastGoodScale,
+            stableGroup.position,
+            stableGroup.quaternion,
+            stableGroup.scale,
+          );
+
+          if (
+            isPoseLocked &&
+            (stableDelta.position > lockSettings.breakPosition || stableDelta.rotation > lockSettings.breakRotation)
+          ) {
+            isPoseLocked = false;
+            stableFrameCount = 0;
+            statusMode = 'smoothing';
+            setStatus('인식됨  안정화 중', 'found', '고정 상태를 해제하고 새 pose로 보간합니다.');
+          }
+
+          if (isPoseLocked) {
+            overlayOpacity += (1 - overlayOpacity) * 0.25;
+          } else {
+            const didMovePosition = stableDelta.position > deadbandSettings.position;
+            const didMoveRotation = stableDelta.rotation > deadbandSettings.rotation;
+            const didMoveScale = stableDelta.scale > deadbandSettings.scale;
+
+            if (didMovePosition) {
+              stableGroup.position.lerp(lastGoodPosition, smoothingSettings.position);
+            }
+
+            if (didMoveRotation) {
+              stableGroup.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
+            }
+
+            if (didMoveScale) {
+              stableGroup.scale.lerp(lastGoodScale, smoothingSettings.scale);
+            }
+
+            const isQuietFrame = !didMovePosition && !didMoveRotation && !didMoveScale;
+            stableFrameCount = lockSettings.enabled && isQuietFrame ? stableFrameCount + 1 : 0;
+
+            if (lockSettings.enabled && stableFrameCount >= lockSettings.stableFrames) {
+              isPoseLocked = true;
+              statusMode = 'locked';
+              setStatus('인식됨  고정됨', 'found', '현재 안정 pose를 유지합니다.');
+            }
+
+            overlayOpacity += (1 - overlayOpacity) * 0.25;
+          }
         }
 
         if (hasLastGoodPose) {
           stableGroup.visible = true;
         }
 
-        if (acceptedPose && statusMode !== 'found' && now - foundAt > 700) {
+        if (acceptedPose && !isPoseLocked && statusMode !== 'found' && now - foundAt > 700) {
           statusMode = 'found';
           setStatus('인식됨', 'found', '교리도 오버레이를 표시하고 있습니다.');
         }
@@ -747,6 +1100,8 @@ async function startAR() {
       poseStats.smoothedCenterY = stableGroup.position.y;
       poseStats.smoothedScale = getScaleScalar(stableGroup.scale);
       poseStats.smoothedRotationDeg = getQuaternionZDegrees(stableGroup.quaternion);
+      poseStats.locked = isPoseLocked;
+      poseStats.activeSectionId = activeSectionId;
       updateDebugPanel(poseStats);
       updateDebugCorners(hasRawPose ? rawMatrix : undefined, stableGroup, camera, renderer);
 
