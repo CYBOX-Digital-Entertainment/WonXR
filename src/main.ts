@@ -1,6 +1,7 @@
 import './styles.css';
 import * as THREE from 'three';
 import { MindARThree } from 'mind-ar/dist/mindar-image-three.prod.js';
+import { formatFeatureSupport, getCompatibilityReport } from './compatibility';
 
 const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
 const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
@@ -15,11 +16,15 @@ const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
 const HIT_AREA_PADDING = 0.012;
-const ELEVATION_Z = 0.03;
-const MAX_ELEVATION_Z = 0.055;
-const BOX_DEPTH = 0.022;
-const SELECTION_ANIMATION_MS = 220;
-const FOUND_TO_EXPLORE_MS = 200;
+const ELEVATION_Z = 0.065;
+const MAX_ELEVATION_Z = 0.12;
+const BOX_DEPTH = 0.06;
+const TOP_OPACITY = 0.95;
+const SIDE_OPACITY = 0.78;
+const HIGHLIGHT_OPACITY = 0.2;
+const OUTLINE_OPACITY = 1.0;
+const SELECTION_ANIMATION_MS = 260;
+const FOUND_TO_EXPLORE_MS = 150;
 const MIN_FOUND_FRAMES_FOR_EXPLORE = 1;
 
 const POSITION_SMOOTHING = 0.1;
@@ -31,7 +36,7 @@ const SCALE_DEADBAND = 0.0015;
 const MAX_POSITION_DELTA = 0.08;
 const MAX_SCALE_DELTA = 0.1;
 const MAX_ROTATION_DELTA = 0.25;
-const LOST_HOLD_MS = 1000;
+const LOST_HOLD_MS = 1200;
 const FADE_OUT_MS = 250;
 const STABLE_LOCK_FRAMES = 20;
 const LOCK_BREAK_POSITION_DELTA = 0.06;
@@ -257,6 +262,8 @@ const lockSettings = {
 };
 const hitAreaPadding = readNonNegativeNumberParam('hitpad', HIT_AREA_PADDING);
 const selectionElevation = Math.min(readNonNegativeNumberParam('elev', ELEVATION_Z), MAX_ELEVATION_Z);
+const selectionDepth = Math.min(readNonNegativeNumberParam('depth', BOX_DEPTH), MAX_ELEVATION_Z);
+const compatibilityReport = getCompatibilityReport();
 
 console.log('WonXR AR config', {
   mode: isFullDebugMode ? 'debug' : 'demo',
@@ -286,7 +293,7 @@ console.log('WonXR AR config', {
   },
   selection: {
     elevation: selectionElevation,
-    boxDepth: BOX_DEPTH,
+    boxDepth: selectionDepth,
   },
   holdMs: lostHoldMs,
   fadeOutMs,
@@ -309,6 +316,14 @@ app.innerHTML = `
     </section>
 
     <button id="start-button" class="start-button" type="button">카메라 시작</button>
+    <button id="info-button" class="info-button" type="button">정보</button>
+
+    <section id="compatibility-panel" class="compatibility-panel hidden" role="alert">
+      <strong id="compatibility-title">AR을 시작할 수 없습니다</strong>
+      <p id="compatibility-message"></p>
+      <p id="compatibility-recommendation"></p>
+      <button id="compatibility-info-button" type="button">개발자 정보 / 라이선스 보기</button>
+    </section>
 
     <aside id="calibration-panel" class="calibration-panel${isCalibrationMode ? '' : ' hidden'}" aria-label="오버레이 보정">
       <div class="calibration-header">
@@ -347,6 +362,7 @@ app.innerHTML = `
           <button id="debug-hide" class="debug-hide" type="button">Hide</button>
         </div>
       </div>
+      <button id="sensor-button" class="sensor-button" type="button">기기 센서 허용</button>
       <pre id="debug-content"></pre>
     </section>
 
@@ -362,6 +378,40 @@ app.innerHTML = `
       <div id="section-card-children" class="section-card-children"></div>
       <p id="section-card-content" class="section-card-content"></p>
       <p class="section-card-note">교무님 검수 후 내용 입력 예정</p>
+    </section>
+
+    <section id="about-panel" class="about-panel hidden" aria-live="polite">
+      <div class="about-header">
+        <div>
+          <p class="section-card-kicker">About</p>
+          <h2>WonXR 교리도 AR</h2>
+        </div>
+        <button id="about-close" class="section-card-close" type="button">닫기</button>
+      </div>
+      <p>원불교 교리도 이미지를 인식하여 교리 구조를 증강현실로 보여주는 공모전용 WebAR 프로토타입입니다.</p>
+      <dl>
+        <dt>Developer</dt>
+        <dd>CYBOX Digital Entertainment</dd>
+        <dt>Developer / Planner</dt>
+        <dd>Song MinSoo</dd>
+        <dt>Project status</dt>
+        <dd>Prototype for Won-Buddhism content contest</dd>
+      </dl>
+      <p>교리 설명 본문은 현재 작성 예정이며, 원불교 교무님 검수 후 반영 예정입니다.</p>
+      <p>이 앱은 교리도 인식을 위해 카메라를 사용합니다. 카메라 영상은 서버로 업로드하지 않으며, 브라우저 내 이미지 인식과 AR 표시 용도로만 사용됩니다.</p>
+      <h3>홈 화면에 추가</h3>
+      <p>iPhone: Safari로 접속한 뒤 공유 버튼을 누르고 홈 화면에 추가를 선택하세요. 홈 화면 앱 모드에서 카메라가 열리지 않으면 Safari에서 직접 열어주세요.</p>
+      <p>Android: Chrome 또는 Samsung Internet에서 앱 설치 또는 홈 화면에 추가를 선택하세요. Android adaptive/themed icon 지원은 런처와 브라우저 WebAPK 지원에 따라 달라집니다.</p>
+      <p>iOS 아이콘 색상/틴트 효과는 iOS 설정에 의해 달라질 수 있으며, 앱은 Home Screen용 아이콘을 제공합니다.</p>
+      <h3>Open source notices</h3>
+      <ul>
+        <li><a href="https://github.com/mrdoob/three.js/blob/dev/LICENSE" target="_blank" rel="noreferrer">Three.js - MIT License</a></li>
+        <li><a href="https://github.com/hiukim/mind-ar-js/blob/master/LICENSE" target="_blank" rel="noreferrer">MindAR - MIT License</a></li>
+        <li><a href="https://github.com/vitejs/vite/blob/main/LICENSE" target="_blank" rel="noreferrer">Vite - MIT License</a></li>
+        <li><a href="https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt" target="_blank" rel="noreferrer">TypeScript - Apache License 2.0</a></li>
+        <li>@types/three - MIT License</li>
+      </ul>
+      <p><a href="https://github.com/CYBOX-Digital-Entertainment/WonXR" target="_blank" rel="noreferrer">GitHub repository</a></p>
     </section>
 
     <div class="status-panel" role="status" aria-live="polite">
@@ -385,14 +435,21 @@ const arContainer = requireElement<HTMLDivElement>('#ar-container');
 const uiOverlay = requireElement<HTMLElement>('.ui-overlay');
 const introTitle = requireElement<HTMLHeadingElement>('#intro-title');
 const startButton = requireElement<HTMLButtonElement>('#start-button');
+const infoButton = requireElement<HTMLButtonElement>('#info-button');
 const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
 const message = requireElement<HTMLParagraphElement>('#message');
+const compatibilityPanel = requireElement<HTMLElement>('#compatibility-panel');
+const compatibilityTitle = requireElement<HTMLElement>('#compatibility-title');
+const compatibilityMessage = requireElement<HTMLParagraphElement>('#compatibility-message');
+const compatibilityRecommendation = requireElement<HTMLParagraphElement>('#compatibility-recommendation');
+const compatibilityInfoButton = requireElement<HTMLButtonElement>('#compatibility-info-button');
 const calibrationValues = requireElement<HTMLSpanElement>('#calibration-values');
 const debugFab = requireElement<HTMLButtonElement>('#debug-fab');
 const debugPanel = requireElement<HTMLElement>('#debug-panel');
 const debugToggle = requireElement<HTMLButtonElement>('#debug-toggle');
 const debugHide = requireElement<HTMLButtonElement>('#debug-hide');
+const sensorButton = requireElement<HTMLButtonElement>('#sensor-button');
 const debugContent = requireElement<HTMLPreElement>('#debug-content');
 const debugOverlay = requireElement<SVGSVGElement>('#debug-overlay');
 const debugTargetCorners = requireElement<SVGPolylineElement>('#debug-target-corners');
@@ -404,6 +461,8 @@ const sectionCardSubtitle = requireElement<HTMLParagraphElement>('#section-card-
 const sectionCardChildren = requireElement<HTMLDivElement>('#section-card-children');
 const sectionCardContent = requireElement<HTMLParagraphElement>('#section-card-content');
 const sectionCardClose = requireElement<HTMLButtonElement>('#section-card-close');
+const aboutPanel = requireElement<HTMLElement>('#about-panel');
+const aboutClose = requireElement<HTMLButtonElement>('#about-close');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
 
@@ -412,6 +471,7 @@ let hasStarted = false;
 let overlayContentGroup: THREE.Group | undefined;
 let overlayPlane: THREE.Mesh | undefined;
 let selectionGroup: THREE.Group | undefined;
+let selectionTextureSource: THREE.Texture | undefined;
 let activeSectionId = '';
 let activeSectionTitle = '';
 let lastTouchedSectionId = '';
@@ -426,6 +486,22 @@ let currentFps = 0;
 let lastFrameAt = performance.now();
 let loadedSectionCount = 0;
 const hitMeshes: THREE.Mesh[] = [];
+let hotspotPointerCleanup: (() => void) | undefined;
+let infoCardOpen = false;
+let lastSelectTime = 0;
+let lastCloseReason = '';
+let lastPointerTarget = '';
+let closeBlockedByDebounce = false;
+let activeRenderer: THREE.WebGLRenderer | undefined;
+let activeCamera: THREE.Camera | undefined;
+let orientationRestartCount = 0;
+let lastOrientationChangeTime = 0;
+let lastRestartReason = '';
+let orientationRestartTimer = 0;
+let serviceWorkerStatus = 'not registered';
+let manifestStatus = 'not checked';
+let sensorPermissionState = 'not requested';
+let deviceOrientationLabel = '-';
 
 const interactionDebug = {
   pointerDownCount: 0,
@@ -448,6 +524,13 @@ const debugAssetPaths = [
   'targets/gyorido_empty.png',
   OVERLAY_IMAGE_PATH,
   HOTSPOT_DATA_PATH,
+  'manifest.webmanifest',
+  'favicon.ico',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+  'icons/apple-touch-icon.png',
+  'icons/maskable-512.png',
+  'icons/monochrome-512.png',
 ];
 const assetLoadStatus: Record<string, string> = Object.fromEntries(
   debugAssetPaths.map((path) => [path, isDebugMode ? 'pending' : 'not checked']),
@@ -555,6 +638,166 @@ async function checkDebugAssets() {
   );
 }
 
+function openAboutPanel() {
+  aboutPanel.classList.remove('hidden');
+}
+
+function closeAboutPanel() {
+  aboutPanel.classList.add('hidden');
+}
+
+function showCompatibilityBlock(reason: string, recommendation: string, title = 'AR을 시작할 수 없습니다') {
+  compatibilityTitle.textContent = title;
+  compatibilityMessage.textContent = `${reason} 현재 브라우저: ${compatibilityReport.browser.name} ${compatibilityReport.browser.version || ''}`;
+  compatibilityRecommendation.textContent = recommendation;
+  compatibilityPanel.classList.remove('hidden');
+  startButton.disabled = true;
+  setStatus(title, 'error', reason);
+}
+
+function applyInitialCompatibilityGate() {
+  if (compatibilityReport.supported) {
+    if (compatibilityReport.warning) {
+      setStatus('브라우저 업데이트 권장', 'ready', compatibilityReport.warning);
+    }
+
+    return;
+  }
+
+  showCompatibilityBlock(compatibilityReport.blockingReason, compatibilityReport.recommendedBrowser, '지원하지 않는 브라우저입니다');
+}
+
+function getDisplayMode() {
+  if (window.matchMedia('(display-mode: fullscreen)').matches) {
+    return 'fullscreen';
+  }
+
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    return 'standalone';
+  }
+
+  return 'browser';
+}
+
+function getIosStandalone() {
+  return Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+}
+
+async function checkManifestStatus() {
+  try {
+    const response = await fetch(assetUrl('manifest.webmanifest'), { method: 'HEAD' });
+    manifestStatus = response.ok ? 'loaded' : `failed ${response.status}`;
+  } catch (error) {
+    manifestStatus = error instanceof Error ? `error: ${error.message}` : 'error';
+  }
+}
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    serviceWorkerStatus = 'unsupported';
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register(assetUrl('sw.js'), {
+      scope: import.meta.env.BASE_URL,
+    });
+    serviceWorkerStatus = registration.active ? 'active' : 'registered';
+  } catch (error) {
+    serviceWorkerStatus = error instanceof Error ? `error: ${error.message}` : 'error';
+  }
+}
+
+function getOrientationLabel() {
+  const screenOrientation = screen.orientation?.type ?? '';
+  const viewport = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+  return screenOrientation ? `${screenOrientation} (${viewport})` : viewport;
+}
+
+function updateRendererForViewport() {
+  activeRenderer?.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  activeRenderer?.setSize(window.innerWidth, window.innerHeight);
+
+  if (activeCamera && 'aspect' in activeCamera && 'updateProjectionMatrix' in activeCamera) {
+    const camera = activeCamera as THREE.PerspectiveCamera;
+    camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
+    camera.updateProjectionMatrix();
+  }
+}
+
+function showOrientationGuidance() {
+  if (window.innerWidth > window.innerHeight) {
+    setStatus('세로 화면에서 더 안정적으로 작동합니다', 'ready', '세로 화면으로 돌아오면 다시 스캔합니다.');
+  }
+}
+
+async function restartAR(reason: string) {
+  if (!hasStarted || !mindarThree) {
+    return;
+  }
+
+  orientationRestartCount += 1;
+  lastRestartReason = reason;
+  lastOrientationChangeTime = performance.now();
+  lastCloseReason = activeSectionId ? `orientation restart: ${reason}` : lastCloseReason;
+  setAppState('scan', '다시 스캔 중', 'ready', '기기 방향 변경 후 AR을 다시 준비합니다.');
+  clearSelectedSection(false, `orientation restart: ${reason}`);
+  hotspotPointerCleanup?.();
+  hotspotPointerCleanup = undefined;
+
+  try {
+    activeRenderer?.setAnimationLoop(null);
+    await mindarThree.stop();
+  } catch (error) {
+    console.warn('Failed to stop MindAR for orientation restart.', error);
+  }
+
+  mindarThree = undefined;
+  activeRenderer = undefined;
+  activeCamera = undefined;
+  overlayContentGroup = undefined;
+  overlayPlane = undefined;
+  selectionGroup = undefined;
+  selectionTextureSource = undefined;
+  hitMeshes.splice(0, hitMeshes.length);
+  hasStarted = false;
+  mindarStartSucceeded = false;
+  arContainer.innerHTML = '';
+
+  window.setTimeout(() => {
+    if (!compatibilityReport.supported) {
+      return;
+    }
+
+    void startAR();
+  }, 300);
+}
+
+function scheduleOrientationRestart(reason: string) {
+  updateRendererForViewport();
+  showOrientationGuidance();
+  window.clearTimeout(orientationRestartTimer);
+  orientationRestartTimer = window.setTimeout(() => {
+    void restartAR(reason);
+  }, 450);
+}
+
+async function requestDeviceSensorPermission() {
+  const orientationEvent = DeviceOrientationEvent as typeof DeviceOrientationEvent & {
+    requestPermission?: () => Promise<'granted' | 'denied'>;
+  };
+
+  try {
+    if (typeof orientationEvent.requestPermission === 'function') {
+      sensorPermissionState = await orientationEvent.requestPermission();
+    } else {
+      sensorPermissionState = 'not required';
+    }
+  } catch (error) {
+    sensorPermissionState = error instanceof Error ? `error: ${error.message}` : 'error';
+  }
+}
+
 function formatCalibrationValue(value: number) {
   return Number(value.toFixed(5)).toString();
 }
@@ -635,6 +878,34 @@ function canUseCamera() {
 
 function isAllowedCameraContext() {
   return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+}
+
+async function hasAnyCameraDevice() {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return true;
+  }
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoInputs = devices.filter((device) => device.kind === 'videoinput');
+    return videoInputs.length > 0 || devices.length === 0;
+  } catch {
+    return true;
+  }
+}
+
+function getCameraErrorMessage(error: unknown) {
+  const name = error instanceof DOMException ? error.name : '';
+
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return '이 기기에는 사용할 수 있는 카메라가 없어 AR 기능을 실행할 수 없습니다.';
+  }
+
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return '카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라 권한을 허용해주세요.';
+  }
+
+  return error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
 }
 
 function assertArLayersCreated() {
@@ -800,6 +1071,11 @@ function updateDebugPanel(stats: PoseStats) {
     `locked: ${stats.locked ? 'yes' : 'no'}`,
     `active section: ${stats.activeSectionId || '-'} ${stats.activeSectionTitle || ''}`,
     `last touched: ${stats.lastTouchedSectionId || '-'} ${stats.lastTouchedSectionTitle || ''}`,
+    `info card open: ${infoCardOpen ? 'yes' : 'no'}`,
+    `last select time: ${lastSelectTime ? Math.round(lastSelectTime).toString() : '-'}`,
+    `last close reason: ${lastCloseReason || '-'}`,
+    `last pointer target: ${lastPointerTarget || '-'}`,
+    `close blocked by debounce: ${closeBlockedByDebounce ? 'yes' : 'no'}`,
     '',
     '[interaction]',
     `pointerdown count: ${interactionDebug.pointerDownCount}`,
@@ -834,9 +1110,22 @@ function updateDebugPanel(stats: PoseStats) {
     `stable scale: ${formatDebugNumber(stats.stableScaleX)}, ${formatDebugNumber(stats.stableScaleY)}, ${formatDebugNumber(stats.stableScaleZ)}`,
     `raw-stable delta: p ${formatDebugNumber(stats.rawStableDeltaPosition)}, r ${formatDebugNumber(stats.rawStableDeltaRotation)}, s ${formatDebugNumber(stats.rawStableDeltaScale)}`,
     `viewing angle approx: ${formatDebugNumber(stats.viewingAngleDeg)}deg`,
+    `orientation: ${getOrientationLabel()}`,
+    `visual viewport: ${
+      window.visualViewport
+        ? `${Math.round(window.visualViewport.width)}x${Math.round(window.visualViewport.height)}`
+        : '-'
+    }`,
+    `last orientation change: ${lastOrientationChangeTime ? Math.round(performance.now() - lastOrientationChangeTime) + 'ms ago' : '-'}`,
+    `restart count: ${orientationRestartCount}`,
+    `last restart reason: ${lastRestartReason || '-'}`,
+    `device orientation: ${deviceOrientationLabel}`,
+    `sensor permission: ${sensorPermissionState}`,
     '',
     '[device/browser]',
-    `browser: ${getBrowserGuess()}`,
+    `browser: ${compatibilityReport.browser.name} ${compatibilityReport.browser.version || ''}`,
+    `browser guess: ${getBrowserGuess()}`,
+    `os: ${compatibilityReport.browser.os} ${compatibilityReport.browser.osVersion || ''}`,
     `platform: ${navigator.platform}`,
     `viewport: ${window.innerWidth}x${window.innerHeight}`,
     `screen: ${window.screen.width}x${window.screen.height}`,
@@ -844,6 +1133,15 @@ function updateDebugPanel(stats: PoseStats) {
     `url: ${window.location.href}`,
     `query: ${window.location.search || '-'}`,
     `userAgent: ${navigator.userAgent}`,
+    '',
+    '[features]',
+    formatFeatureSupport(compatibilityReport.features),
+    '',
+    '[pwa]',
+    `display mode: ${getDisplayMode()}`,
+    `ios standalone: ${getIosStandalone() ? 'yes' : 'no'}`,
+    `service worker: ${serviceWorkerStatus}`,
+    `manifest: ${manifestStatus}`,
     '',
     '[camera/rendering]',
     `mindar start success: ${mindarStartSucceeded ? 'yes' : 'no'}`,
@@ -1063,9 +1361,7 @@ function setupHotspotPointer(
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
 
-  window.addEventListener(
-    'pointerdown',
-    (event) => {
+  const handlePointerDown = (event: PointerEvent) => {
       interactionDebug.pointerDownCount += 1;
       interactionDebug.lastPointerX = event.clientX;
       interactionDebug.lastPointerY = event.clientY;
@@ -1077,8 +1373,12 @@ function setupHotspotPointer(
       interactionDebug.lastPointerNdcX = pointer.x;
       interactionDebug.lastPointerNdcY = pointer.y;
       const target = event.target;
+      lastPointerTarget = target instanceof Element ? `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ''}` : String(target);
 
-      if (target instanceof Element && target.closest('.debug-panel, .debug-fab, .calibration-panel, .section-card, button')) {
+      if (
+        target instanceof Element &&
+        target.closest('.debug-panel, .debug-fab, .calibration-panel, .section-card, .about-panel, .compatibility-panel, button')
+      ) {
         interactionDebug.lastPointerIgnoredByUi = true;
         interactionDebug.lastPointerIgnoredReason = 'ui control';
         interactionDebug.lastPointerMessage = 'ignored: UI';
@@ -1125,10 +1425,12 @@ function setupHotspotPointer(
       interactionDebug.lastHitSectionTitle = section.title;
       interactionDebug.lastPointerMessage = 'hit';
       console.log('WonXR hotspot selected', { id: section.id, title: section.title });
+      event.stopPropagation();
       onSelect(section);
-    },
-    { passive: true },
-  );
+  };
+
+  window.addEventListener('pointerdown', handlePointerDown, { passive: true });
+  return () => window.removeEventListener('pointerdown', handlePointerDown);
 }
 
 function createSelectionGroup(section: DoctrineSection) {
@@ -1142,40 +1444,91 @@ function createSelectionGroup(section: DoctrineSection) {
   const highlightMaterial = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.22,
+    opacity: HIGHLIGHT_OPACITY,
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
   const highlightPlane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), highlightMaterial);
-  highlightPlane.position.z = 0.002;
+  highlightPlane.position.z = -selectionDepth + 0.002;
   highlightPlane.renderOrder = 40;
   group.add(highlightPlane);
 
-  const boxMaterial = new THREE.MeshBasicMaterial({
+  const backingMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const topBacking = new THREE.Mesh(new THREE.PlaneGeometry(width, height), backingMaterial);
+  topBacking.position.z = 0.001;
+  topBacking.renderOrder = 43;
+  group.add(topBacking);
+
+  const croppedTexture = selectionTextureSource?.clone();
+
+  if (croppedTexture) {
+    croppedTexture.offset.set(section.hotspot.nx, 1 - section.hotspot.ny - section.hotspot.nh);
+    croppedTexture.repeat.set(section.hotspot.nw, section.hotspot.nh);
+    croppedTexture.needsUpdate = true;
+  }
+
+  const topMaterial = new THREE.MeshBasicMaterial({
+    map: croppedTexture,
+    color: croppedTexture ? 0xffffff : color,
+    transparent: true,
+    opacity: TOP_OPACITY,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const topSurface = new THREE.Mesh(new THREE.PlaneGeometry(width, height), topMaterial);
+  topSurface.position.z = 0.004;
+  topSurface.renderOrder = 45;
+  group.add(topSurface);
+
+  const sideMaterial = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
-    opacity: 0.28,
+    opacity: SIDE_OPACITY,
     depthTest: false,
     depthWrite: false,
   });
-  const raisedBox = new THREE.Mesh(new THREE.BoxGeometry(width, height, BOX_DEPTH), boxMaterial);
-  raisedBox.position.z = BOX_DEPTH / 2;
-  raisedBox.renderOrder = 42;
-  group.add(raisedBox);
+  const wallThickness = Math.max(0.006, Math.min(width, height) * 0.045);
+  const topWall = new THREE.Mesh(new THREE.BoxGeometry(width, wallThickness, selectionDepth), sideMaterial);
+  topWall.position.set(0, height / 2 + wallThickness / 2, -selectionDepth / 2);
+  topWall.renderOrder = 42;
+  group.add(topWall);
+
+  const bottomWall = new THREE.Mesh(new THREE.BoxGeometry(width, wallThickness, selectionDepth), sideMaterial);
+  bottomWall.position.set(0, -height / 2 - wallThickness / 2, -selectionDepth / 2);
+  bottomWall.renderOrder = 42;
+  group.add(bottomWall);
+
+  const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, height, selectionDepth), sideMaterial);
+  leftWall.position.set(-width / 2 - wallThickness / 2, 0, -selectionDepth / 2);
+  leftWall.renderOrder = 42;
+  group.add(leftWall);
+
+  const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallThickness, height, selectionDepth), sideMaterial);
+  rightWall.position.set(width / 2 + wallThickness / 2, 0, -selectionDepth / 2);
+  rightWall.renderOrder = 42;
+  group.add(rightWall);
 
   const halfWidth = width / 2;
   const halfHeight = height / 2;
   const outlineGeometry = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-halfWidth, halfHeight, BOX_DEPTH + 0.004),
-    new THREE.Vector3(halfWidth, halfHeight, BOX_DEPTH + 0.004),
-    new THREE.Vector3(halfWidth, -halfHeight, BOX_DEPTH + 0.004),
-    new THREE.Vector3(-halfWidth, -halfHeight, BOX_DEPTH + 0.004),
+    new THREE.Vector3(-halfWidth, halfHeight, 0.008),
+    new THREE.Vector3(halfWidth, halfHeight, 0.008),
+    new THREE.Vector3(halfWidth, -halfHeight, 0.008),
+    new THREE.Vector3(-halfWidth, -halfHeight, 0.008),
   ]);
   const outlineMaterial = new THREE.LineBasicMaterial({
     color: '#facc15',
     transparent: true,
-    opacity: 0.98,
+    opacity: OUTLINE_OPACITY,
     depthTest: false,
     depthWrite: false,
   });
@@ -1184,7 +1537,7 @@ function createSelectionGroup(section: DoctrineSection) {
   group.add(outline);
 
   const label = createLabelSprite(section.title, color);
-  label.position.set(0, halfHeight + 0.045, BOX_DEPTH + 0.018);
+  label.position.set(0, halfHeight + 0.045, 0.03);
   label.scale.set(0.24, 0.06, 1);
   group.add(label);
 
@@ -1206,6 +1559,7 @@ function updateSelectionAnimation() {
 
 function showSectionCard(section: DoctrineSection) {
   sectionCard.classList.remove('hidden');
+  infoCardOpen = true;
   sectionCardKicker.textContent = '선택 구역';
   sectionCardTitle.textContent = section.title;
   sectionCardSubtitle.textContent = section.subtitle ?? '';
@@ -1222,9 +1576,17 @@ function showSectionCard(section: DoctrineSection) {
   sectionCardContent.textContent = content === '작성 예정' ? '교무님 검수 후 내용 입력 예정' : content;
 }
 
-function clearSelectedSection(updateStatus = true) {
+function clearSelectedSection(updateStatus = true, reason = 'close button') {
+  if (activeSectionId && performance.now() - lastSelectTime < 250 && reason === 'outside click') {
+    closeBlockedByDebounce = true;
+    return;
+  }
+
+  closeBlockedByDebounce = false;
+  lastCloseReason = reason;
   activeSectionId = '';
   activeSectionTitle = '';
+  infoCardOpen = false;
   sectionCard.classList.add('hidden');
   selectionGroup?.removeFromParent();
   selectionGroup = undefined;
@@ -1241,6 +1603,9 @@ function selectSection(section: DoctrineSection) {
     return;
   }
 
+  lastSelectTime = performance.now();
+  closeBlockedByDebounce = false;
+  lastCloseReason = '';
   activeSectionId = section.id;
   activeSectionTitle = section.title;
   lastTouchedSectionId = section.id;
@@ -1258,6 +1623,11 @@ async function startAR() {
     return;
   }
 
+  if (!compatibilityReport.supported) {
+    showCompatibilityBlock(compatibilityReport.blockingReason, compatibilityReport.recommendedBrowser, '지원하지 않는 브라우저입니다');
+    return;
+  }
+
   if (!canUseCamera()) {
     setStatus('카메라를 사용할 수 없습니다', 'error', '이 브라우저는 카메라 접근을 지원하지 않습니다.');
     return;
@@ -1265,6 +1635,15 @@ async function startAR() {
 
   if (!isAllowedCameraContext()) {
     setStatus('HTTPS 환경이 필요합니다', 'error', '카메라 권한은 HTTPS 또는 localhost에서만 요청할 수 있습니다.');
+    return;
+  }
+
+  if (!(await hasAnyCameraDevice())) {
+    showCompatibilityBlock(
+      '이 기기에는 사용할 수 있는 카메라가 없어 AR 기능을 실행할 수 없습니다.',
+      compatibilityReport.recommendedBrowser,
+      '카메라를 찾을 수 없습니다',
+    );
     return;
   }
 
@@ -1288,6 +1667,7 @@ async function startAR() {
     });
     activeTargetVersion = targetMind.version;
     loadedSectionCount = doctrineSections.length;
+    selectionTextureSource = overlayTexture;
 
     mindarThree = new MindARThree({
       container: arContainer,
@@ -1305,6 +1685,8 @@ async function startAR() {
     });
 
     const { renderer, scene, camera } = mindarThree;
+    activeRenderer = renderer;
+    activeCamera = camera;
     const anchor = mindarThree.addAnchor(0);
     const stableGroup = new THREE.Group();
     const targetPosition = new THREE.Vector3();
@@ -1402,7 +1784,8 @@ async function startAR() {
     hitMeshes.splice(0, hitMeshes.length, ...hotspotHitMeshes);
     poseStats.hitMeshCount = hitMeshes.length;
     overlayContentGroup.add(hotspotDebugGroup);
-    setupHotspotPointer(
+    hotspotPointerCleanup?.();
+    hotspotPointerCleanup = setupHotspotPointer(
       camera,
       hitMeshes,
       () => isTargetFound || stableGroup.visible || currentAppState === 'holding',
@@ -1573,7 +1956,7 @@ async function startAR() {
           stableGroup.visible = false;
           isStableInitialized = false;
           hasLastGoodPose = false;
-          clearSelectedSection(false);
+            clearSelectedSection(false, 'target lost timeout');
 
           if (currentAppState !== 'lost') {
             setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
@@ -1666,21 +2049,30 @@ async function startAR() {
 
     mindarThree = undefined;
     mindarStartSucceeded = false;
+    activeRenderer = undefined;
+    activeCamera = undefined;
+    hotspotPointerCleanup?.();
+    hotspotPointerCleanup = undefined;
     overlayContentGroup = undefined;
     overlayPlane = undefined;
     selectionGroup = undefined;
     hasStarted = false;
     setUiCompact(false);
     startButton.disabled = false;
+    startButton.classList.remove('hidden');
     startButton.textContent = '다시 시도';
 
-    const detail = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
+    const detail = getCameraErrorMessage(error);
     lastErrorMessage = detail;
     const title = detail.includes('영상 요소')
       ? '카메라 영상 생성 실패'
-      : detail.toLowerCase().includes('camera') || detail.toLowerCase().includes('permission')
+      : detail.includes('권한') || detail.includes('카메라') || detail.toLowerCase().includes('camera') || detail.toLowerCase().includes('permission')
         ? '카메라 시작 실패'
         : 'AR 시작 실패';
+
+    if (detail.includes('카메라가 없어')) {
+      showCompatibilityBlock(detail, compatibilityReport.recommendedBrowser, '카메라를 찾을 수 없습니다');
+    }
 
     setStatus(title, 'error', detail);
     console.error(error);
@@ -1713,8 +2105,12 @@ for (const button of calibrationActionButtons) {
 }
 
 sectionCardClose.addEventListener('click', () => {
-  clearSelectedSection();
+  clearSelectedSection(true, 'close button');
 });
+
+infoButton.addEventListener('click', openAboutPanel);
+compatibilityInfoButton.addEventListener('click', openAboutPanel);
+aboutClose.addEventListener('click', closeAboutPanel);
 
 debugToggle.addEventListener('click', () => {
   debugPanel.classList.toggle('collapsed');
@@ -1729,12 +2125,42 @@ debugFab.addEventListener('click', () => {
   debugPanel.classList.remove('user-hidden');
 });
 
+sensorButton.addEventListener('click', () => {
+  void requestDeviceSensorPermission();
+});
+
+window.addEventListener('resize', () => {
+  updateRendererForViewport();
+  showOrientationGuidance();
+});
+
+window.addEventListener('orientationchange', () => {
+  scheduleOrientationRestart('orientationchange');
+});
+
+screen.orientation?.addEventListener('change', () => {
+  scheduleOrientationRestart('screen.orientation change');
+});
+
+window.visualViewport?.addEventListener('resize', () => {
+  updateRendererForViewport();
+});
+
+window.addEventListener('deviceorientation', (event) => {
+  deviceOrientationLabel = `alpha ${formatDebugNumber(event.alpha ?? Number.NaN)}, beta ${formatDebugNumber(
+    event.beta ?? Number.NaN,
+  )}, gamma ${formatDebugNumber(event.gamma ?? Number.NaN)}`;
+});
+
 window.addEventListener('beforeunload', () => {
   mindarThree?.stop();
 });
 
 updateCalibrationDisplay();
+applyInitialCompatibilityGate();
 void checkDebugAssets();
+void checkManifestStatus();
+void registerServiceWorker();
 
 startButton.addEventListener('click', () => {
   void startAR();

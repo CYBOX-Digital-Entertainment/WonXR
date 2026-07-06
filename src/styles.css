@@ -185,6 +185,23 @@ h1 {
   display: none;
 }
 
+.info-button {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 12px);
+  right: 12px;
+  z-index: 7;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color: #f8fafc;
+  background: rgba(11, 15, 18, 0.62);
+  font-size: 0.76rem;
+  font-weight: 850;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+}
+
 .status-panel {
   position: absolute;
   left: 16px;
@@ -319,7 +336,7 @@ h1 {
 
 .debug-fab {
   position: absolute;
-  top: calc(env(safe-area-inset-top) + 12px);
+  top: calc(env(safe-area-inset-top) + 52px);
   right: 12px;
   z-index: 31;
   min-height: 34px;
@@ -353,7 +370,8 @@ h1 {
 }
 
 .debug-toggle,
-.debug-hide {
+.debug-hide,
+.sensor-button {
   min-height: 28px;
   padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -363,6 +381,11 @@ h1 {
   font-size: 0.72rem;
   font-weight: 800;
   cursor: pointer;
+}
+
+.sensor-button {
+  width: 100%;
+  margin: 0 0 8px;
 }
 
 .debug-panel pre {
@@ -404,6 +427,105 @@ h1 {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(16px);
   pointer-events: auto;
+}
+
+.about-panel,
+.compatibility-panel {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom) + 68px);
+  z-index: 16;
+  max-height: min(64vh, 520px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(9, 12, 15, 0.9);
+  color: #f8fafc;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(16px);
+  pointer-events: auto;
+}
+
+.compatibility-panel {
+  top: calc(env(safe-area-inset-top) + 72px);
+  bottom: auto;
+}
+
+.about-panel.hidden,
+.compatibility-panel.hidden {
+  display: none;
+}
+
+.about-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.about-panel h2,
+.about-panel h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+.about-panel h3 {
+  margin-top: 16px;
+  font-size: 0.95rem;
+}
+
+.about-panel p,
+.compatibility-panel p {
+  margin: 10px 0 0;
+  color: rgba(248, 250, 252, 0.84);
+  font-size: 0.86rem;
+  line-height: 1.48;
+}
+
+.about-panel dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 12px 0;
+  font-size: 0.82rem;
+}
+
+.about-panel dt {
+  color: #a7f3d0;
+  font-weight: 850;
+}
+
+.about-panel dd {
+  margin: 0;
+}
+
+.about-panel ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: rgba(248, 250, 252, 0.86);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.about-panel a {
+  color: #93c5fd;
+}
+
+.compatibility-panel strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.compatibility-panel button {
+  margin-top: 12px;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color: #07120d;
+  background: #6ee7b7;
+  font-weight: 850;
 }
 
 .section-card.hidden {
