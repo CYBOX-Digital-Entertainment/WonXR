@@ -25,9 +25,15 @@ npm run build
 
 ## GitHub Pages 배포
 
-1. `npm run build`를 실행합니다.
-2. GitHub Pages의 배포 소스를 GitHub Actions 또는 `dist/` 배포 방식으로 설정합니다.
-3. 저장소 이름이 `WonXR`이면 배포 URL은 일반적으로 `https://<계정명>.github.io/WonXR/` 형식입니다.
+이 프로젝트는 `.github/workflows/deploy.yml` GitHub Actions workflow로 배포합니다.
+
+1. GitHub 저장소의 `Settings` > `Pages`로 이동합니다.
+2. `Build and deployment`의 `Source`를 `GitHub Actions`로 설정합니다.
+3. `main` 브랜치에 push하면 workflow가 자동 실행됩니다.
+4. workflow는 `npm ci`, `npm run build`를 실행한 뒤 `dist/` 폴더를 GitHub Pages에 배포합니다.
+5. 저장소 이름이 `WonXR`이면 배포 URL은 일반적으로 `https://<계정명>.github.io/WonXR/` 형식입니다.
+
+수동으로 다시 배포해야 할 때는 GitHub의 `Actions` 탭에서 `Deploy GitHub Pages` workflow를 선택한 뒤 `Run workflow`를 실행합니다.
 
 ## 파일 구조
 
