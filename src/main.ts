@@ -614,6 +614,7 @@ let lastTouchWarning = '';
 let currentFps = 0;
 let lastFrameAt = performance.now();
 let loadedSectionCount = 0;
+let shouldShowScanGuide = true;
 const hitMeshes: THREE.Mesh[] = [];
 let hotspotPointerCleanup: (() => void) | undefined;
 let infoCardOpen = false;
@@ -742,7 +743,7 @@ function setUiCompact(isCompact: boolean) {
 }
 
 function updatePlacementButton() {
-  if (currentAppState === 'tracking' || currentAppState === 'hold' || currentAppState === 'lost') {
+  if ((currentAppState === 'tracking' || currentAppState === 'hold' || currentAppState === 'lost') && !infoCardOpen) {
     placementButton.textContent = '다시 스캔';
     placementButton.disabled = false;
     placementButton.classList.remove('hidden');
@@ -755,12 +756,12 @@ function updatePlacementButton() {
 
 function setAppState(nextState: AppState, status: string, tone: StatusTone, detail: string) {
   currentAppState = nextState;
-  const isCompact = nextState === 'tracking' || nextState === 'hold';
+  const isCompact = nextState === 'tracking' || nextState === 'hold' || (nextState === 'lost' && !shouldShowScanGuide);
   const shouldPreserveSelectedStatus =
     infoCardOpen && activeSectionTitle !== '' && (nextState === 'tracking' || nextState === 'hold');
   setUiCompact(isCompact);
   introTitle.textContent = isCompact ? 'WonXR' : '교리도 그림을 비춰주세요';
-  scanGuide.classList.toggle('hidden', nextState === 'tracking' || nextState === 'hold');
+  scanGuide.classList.toggle('hidden', nextState !== 'scan' || !shouldShowScanGuide);
   scanGuide.classList.toggle('fading', false);
   uiOverlay.dataset.state = nextState;
   updatePlacementButton();
@@ -1954,6 +1955,7 @@ function updateSelectionAnimation() {
 function showSectionCard(section: DoctrineSection) {
   sectionCard.classList.remove('hidden');
   infoCardOpen = true;
+  updatePlacementButton();
   sectionCardKicker.textContent = '선택 구역';
   sectionCardTitle.textContent = section.title;
   sectionCardSubtitle.textContent = section.subtitle ?? '';
@@ -1984,6 +1986,7 @@ function clearSelectedSection(updateStatus = true, reason = 'close button') {
   sectionCard.classList.add('hidden');
   selectionGroup?.removeFromParent();
   selectionGroup = undefined;
+  updatePlacementButton();
 
   if (updateStatus) {
     const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'lost';
@@ -2009,6 +2012,7 @@ function selectSection(section: DoctrineSection) {
   overlayContentGroup?.add(selectionGroup);
   showSectionCard(section);
   setUiCompact(true);
+  updatePlacementButton();
   setStatus(`선택됨: ${section.title}`, 'found', section.subtitle ?? '선택한 구역 정보를 표시합니다.');
 }
 
@@ -2210,6 +2214,7 @@ async function startAR() {
       const now = performance.now();
       rescanCount += 1;
       lastRescanReason = reason;
+      shouldShowScanGuide = true;
       isStableInitialized = false;
       hasLastGoodPose = false;
       lastGoodScaleScalar = 1;
@@ -2315,6 +2320,7 @@ async function startAR() {
         }
 
         if (acceptedPose && !isStableInitialized) {
+          shouldShowScanGuide = false;
           arRoot.position.copy(lastGoodPosition);
           arRoot.quaternion.copy(lastGoodQuaternion);
           arRoot.scale.copy(lastGoodScale);
@@ -2323,6 +2329,7 @@ async function startAR() {
           arRoot.visible = true;
           setAppState('tracking', '인식됨  구역을 터치하세요', 'found', '교리도를 화면 안에 유지하면 더 안정적으로 보입니다.');
         } else if (acceptedPose) {
+          shouldShowScanGuide = false;
           const stableDelta = getPoseDelta(
             lastGoodPosition,
             lastGoodQuaternion,
