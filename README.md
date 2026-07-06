@@ -90,6 +90,9 @@ GitHub 저장소 설정:
 2. `Build and deployment`의 `Source`를 `Deploy from a branch`로 선택합니다.
 3. `Branch`는 `gh-pages`, `Folder`는 `/root`로 선택합니다.
 
+이 저장소에서는 GitHub Pages의 `GitHub Actions` Source 방식을 사용하지 않습니다.
+`actions/deploy-pages` 단계가 반복적으로 `Deployment failed, try again later.` 오류를 내기 때문에, `gh-pages` 브랜치 루트 배포만 사용합니다.
+
 ## PWA Icons
 
 PWA 아이콘은 `public/icons/`에 있습니다.
