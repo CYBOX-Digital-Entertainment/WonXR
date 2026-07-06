@@ -236,7 +236,8 @@ h1 {
 
 .scan-guide img {
   width: 100%;
-  aspect-ratio: 100 / 141.5;
+  height: auto;
+  max-height: min(48dvh, 360px);
   object-fit: contain;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.1);
@@ -358,6 +359,10 @@ h1 {
   color: var(--text-primary);
   font-size: 0.86rem;
   line-height: 1.35;
+}
+
+.ui-overlay[data-state='scan'] .status-panel {
+  bottom: calc(env(safe-area-inset-bottom) + 16px);
 }
 
 .calibration-panel {

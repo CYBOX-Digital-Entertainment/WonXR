@@ -6,6 +6,7 @@ import { formatFeatureSupport, getCompatibilityReport } from './compatibility';
 const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
 const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
 const TARGET_IMAGE_PATH = 'targets/gyorido_empty.png';
+const TARGET_EMPTY_GUIDE_IMAGE_PATH = 'targets/gyorido_empty_guide.png';
 const TARGET_IMAGE_V2_PATH = 'targets/gyorido_empty_v2.png';
 const TARGET_ORIGINAL_MIND_PATH = 'targets/gyorido_original.mind';
 const TARGET_ORIGINAL_IMAGE_PATH = 'targets/gyorido_original.png';
@@ -37,7 +38,12 @@ const SELECTION_ANIMATION_MS = 260;
 const MAIN_SECTION_FILL_OPACITY = 0.16;
 const MAIN_SECTION_OUTLINE_OPACITY = 0.74;
 const ORIGINAL_TEXT_OVERLAY_OPACITY = 0.15;
-const HANJA_TEXT_OVERLAY_OPACITY = 0;
+const HANJA_TEXT_OVERLAY_OPACITY = 1;
+const HANJA_CONTENT_SCALE_X = 0.985;
+const HANJA_CONTENT_SCALE_Y = 1.077;
+const HANJA_CONTENT_OFFSET_X = -0.002;
+const HANJA_CONTENT_OFFSET_Y = -0.032;
+const HANJA_CONTENT_ROTATION_Z = 0;
 
 const POSITION_SMOOTHING = 0.12;
 const ROTATION_SMOOTHING = 0.12;
@@ -65,12 +71,55 @@ const isDebugMode = isFullDebugMode || queryParams.get('debug') === '1';
 const isHotspotMode = isFullDebugMode || queryParams.get('hotspots') === '1';
 const targetParam = queryParams.get('target');
 const requestedTargetMode =
-  targetParam === 'v1' || targetParam === 'original' || targetParam === 'hanja' || targetParam === 'multi'
+  targetParam === 'v1' || targetParam === 'v2' || targetParam === 'original' || targetParam === 'hanja' || targetParam === 'multi'
     ? targetParam
-    : 'v2';
-function getScanGuideImagePath() {
-  // The pre-scan guide is intentionally the clean empty diagram, not the patterned tracking target.
-  return TARGET_IMAGE_PATH;
+    : 'multi';
+const multiTargetModes = ['hanja', 'original', 'v1'] as const;
+
+function getTargetImagePath(mode = requestedTargetMode) {
+  if (mode === 'multi') {
+    return TARGET_HANJA_IMAGE_PATH;
+  }
+
+  if (mode === 'hanja') {
+    return TARGET_HANJA_IMAGE_PATH;
+  }
+
+  if (mode === 'original') {
+    return TARGET_ORIGINAL_IMAGE_PATH;
+  }
+
+  if (mode === 'v1') {
+    return TARGET_IMAGE_PATH;
+  }
+
+  return TARGET_IMAGE_V2_PATH;
+}
+
+function getScanGuideImagePath(_mode = requestedTargetMode) {
+  // The pre-scan guide is a visual alignment aid only. Keep it as the empty doctrine diagram,
+  // even when the recognition target is the Hanja diagram.
+  return TARGET_EMPTY_GUIDE_IMAGE_PATH;
+}
+
+function getModeForTargetIndex(targetIndex: number): TargetMode {
+  if (requestedTargetMode !== 'multi' && activeTargetMode !== 'multi') {
+    return activeTargetMode;
+  }
+
+  return multiTargetModes[targetIndex] ?? 'hanja';
+}
+
+function getTextOverlayOpacity(mode: TargetMode) {
+  if (mode === 'hanja') {
+    return HANJA_TEXT_OVERLAY_OPACITY;
+  }
+
+  if (mode === 'original') {
+    return ORIGINAL_TEXT_OVERLAY_OPACITY;
+  }
+
+  return 1;
 }
 
 const scanGuideImagePath = getScanGuideImagePath();
@@ -87,6 +136,7 @@ type OverlayCalibration = {
 };
 
 type CalibrationField = keyof OverlayCalibration;
+type ContentTransform = OverlayCalibration;
 
 type TrackingProfile = 'smooth' | 'responsive';
 type TargetMode = 'v2' | 'v1' | 'original' | 'hanja' | 'multi';
@@ -210,6 +260,26 @@ const overlayCalibration: OverlayCalibration = {
   rotationZ: readCalibrationValue('rotationZ', OVERLAY_ROTATION_Z),
 };
 
+const neutralContentTransform: ContentTransform = {
+  scaleX: 1,
+  scaleY: 1,
+  offsetX: 0,
+  offsetY: 0,
+  rotationZ: 0,
+};
+
+const hanjaContentTransform: ContentTransform = {
+  scaleX: readNumberParam('hsx', HANJA_CONTENT_SCALE_X),
+  scaleY: readNumberParam('hsy', HANJA_CONTENT_SCALE_Y),
+  offsetX: readNumberParam('hox', HANJA_CONTENT_OFFSET_X),
+  offsetY: readNumberParam('hoy', HANJA_CONTENT_OFFSET_Y),
+  rotationZ: readNumberParam('hrz', HANJA_CONTENT_ROTATION_Z),
+};
+
+function getContentTransformForMode(mode: TargetMode): ContentTransform {
+  return mode === 'hanja' ? hanjaContentTransform : neutralContentTransform;
+}
+
 const profileDefaults: Record<TrackingProfile, ProfileSettings> = {
   smooth: {
     positionSmoothing: POSITION_SMOOTHING,
@@ -266,6 +336,28 @@ const hitAreaPadding = readNonNegativeNumberParam('hitpad', HIT_AREA_PADDING);
 const selectionElevation = Math.min(readNonNegativeNumberParam('elev', ELEVATION_Z), MAX_ELEVATION_Z);
 const selectionDepth = Math.min(readNonNegativeNumberParam('depth', BOX_DEPTH), MAX_ELEVATION_Z);
 const compatibilityReport = getCompatibilityReport();
+let activeTargetImageWidth = TARGET_IMAGE_WIDTH;
+let activeTargetImageHeight = TARGET_IMAGE_HEIGHT;
+let activeTargetAspect = TARGET_ASPECT;
+let activeTargetWidth = TARGET_WIDTH;
+let activeTargetHeight = TARGET_HEIGHT;
+
+function setActiveTargetPlaneDimensions(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    activeTargetImageWidth = TARGET_IMAGE_WIDTH;
+    activeTargetImageHeight = TARGET_IMAGE_HEIGHT;
+    activeTargetAspect = TARGET_ASPECT;
+    activeTargetWidth = TARGET_WIDTH;
+    activeTargetHeight = TARGET_HEIGHT;
+    return;
+  }
+
+  activeTargetImageWidth = width;
+  activeTargetImageHeight = height;
+  activeTargetAspect = height / width;
+  activeTargetWidth = TARGET_WIDTH;
+  activeTargetHeight = activeTargetAspect;
+}
 
 console.log('WonXR AR config', {
   mode: isFullDebugMode ? 'debug' : 'demo',
@@ -312,7 +404,7 @@ if (!app) {
 app.innerHTML = `
   <div id="ar-container" class="ar-container" aria-hidden="true"></div>
 
-  <main class="ui-overlay">
+  <main class="ui-overlay" data-state="scan">
     <section class="intro-panel top-ui-layer" aria-live="polite">
       <p class="eyebrow">WonXR</p>
       <h1 id="intro-title">교리도 그림을 비춰주세요</h1>
@@ -324,7 +416,7 @@ app.innerHTML = `
       <p>교리도 전체가 이 영역에 들어오게 비춰주세요</p>
     </section>
 
-    <button id="start-button" class="start-button" type="button">카메라 시작</button>
+    <button id="start-button" class="start-button" type="button">스캔 시작</button>
     <div id="ar-bottom-controls" class="bottom-controls">
       <button id="placement-button" class="placement-button hidden" type="button">다시 스캔</button>
     </div>
@@ -485,14 +577,15 @@ const aboutClose = requireElement<HTMLButtonElement>('#about-close');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
 let scanGuideFallbackUsed = false;
+let activeScanGuideImagePath = scanGuideImagePath;
 
 scanGuideImage.addEventListener('error', () => {
-  if (scanGuideFallbackUsed || scanGuideImagePath === TARGET_IMAGE_PATH) {
+  if (scanGuideFallbackUsed || scanGuideImagePath === TARGET_EMPTY_GUIDE_IMAGE_PATH) {
     return;
   }
 
   scanGuideFallbackUsed = true;
-  activeScanGuideImagePath = TARGET_IMAGE_PATH;
+  activeScanGuideImagePath = TARGET_EMPTY_GUIDE_IMAGE_PATH;
   scanGuideImage.src = assetUrl(activeScanGuideImagePath);
 });
 
@@ -510,13 +603,8 @@ let lastTouchedSectionTitle = '';
 let activeTargetMode: TargetMode = requestedTargetMode;
 let activeTargetFallbackUsed = false;
 let activeTargetMindPath = getRequestedTargetMindPath();
-let activeScanGuideImagePath = scanGuideImagePath;
-let textOverlayOpacity =
-  requestedTargetMode === 'hanja'
-    ? HANJA_TEXT_OVERLAY_OPACITY
-    : requestedTargetMode === 'original'
-      ? ORIGINAL_TEXT_OVERLAY_OPACITY
-      : 1;
+let activeContentMode: TargetMode = requestedTargetMode === 'multi' ? 'hanja' : requestedTargetMode;
+let textOverlayOpacity = getTextOverlayOpacity(activeContentMode);
 let recognizedTargetIndex = Number.NaN;
 let currentAppState: AppState = 'scan';
 let mindarStartSucceeded = false;
@@ -571,6 +659,7 @@ const debugAssetPaths = [
   TARGET_IMAGE_V2_PATH,
   TARGET_MIND_PATH,
   TARGET_IMAGE_PATH,
+  TARGET_EMPTY_GUIDE_IMAGE_PATH,
   TARGET_ORIGINAL_MIND_PATH,
   TARGET_ORIGINAL_IMAGE_PATH,
   TARGET_HANJA_MIND_PATH,
@@ -891,14 +980,21 @@ function persistCalibration() {
 }
 
 function applyOverlayCalibration(shouldPersist = false) {
+  const contentTransform = getContentTransformForMode(activeContentMode);
+  const combinedScaleX = overlayCalibration.scaleX * contentTransform.scaleX;
+  const combinedScaleY = overlayCalibration.scaleY * contentTransform.scaleY;
+  const combinedOffsetX = overlayCalibration.offsetX + contentTransform.offsetX;
+  const combinedOffsetY = overlayCalibration.offsetY + contentTransform.offsetY;
+  const combinedRotationZ = overlayCalibration.rotationZ + contentTransform.rotationZ;
+
   if (overlayContentGroup) {
-    overlayContentGroup.scale.set(overlayCalibration.scaleX, overlayCalibration.scaleY, 1);
-    overlayContentGroup.position.set(overlayCalibration.offsetX, overlayCalibration.offsetY, 0.001);
-    overlayContentGroup.rotation.z = overlayCalibration.rotationZ;
+    overlayContentGroup.scale.set(combinedScaleX, combinedScaleY, 1);
+    overlayContentGroup.position.set(combinedOffsetX, combinedOffsetY, 0.001);
+    overlayContentGroup.rotation.z = combinedRotationZ;
   } else if (overlayPlane) {
-    overlayPlane.scale.set(overlayCalibration.scaleX, overlayCalibration.scaleY, 1);
-    overlayPlane.position.set(overlayCalibration.offsetX, overlayCalibration.offsetY, 0.001);
-    overlayPlane.rotation.z = overlayCalibration.rotationZ;
+    overlayPlane.scale.set(combinedScaleX, combinedScaleY, 1);
+    overlayPlane.position.set(combinedOffsetX, combinedOffsetY, 0.001);
+    overlayPlane.rotation.z = combinedRotationZ;
   }
 
   updateCalibrationDisplay();
@@ -1174,6 +1270,7 @@ function updateDebugPanel(stats: PoseStats) {
     `loaded target file: ${activeTargetMindPath}`,
     `fallback used: ${stats.fallbackUsed ? 'yes' : 'no'}`,
     `recognized target index: ${Number.isFinite(recognizedTargetIndex) ? recognizedTargetIndex : '-'}`,
+    `content mode: ${activeContentMode}`,
     `hanja image loaded: ${assetLoadStatus[TARGET_HANJA_IMAGE_PATH] ?? '-'}`,
     `hanja mind loaded: ${assetLoadStatus[TARGET_HANJA_MIND_PATH] ?? '-'}`,
     `profile: ${stats.profile}`,
@@ -1195,13 +1292,14 @@ function updateDebugPanel(stats: PoseStats) {
     `target scale: ${formatDebugNumber(getScaleScalar(currentTargetScale))}`,
     `rescan count: ${rescanCount}`,
     `last rescan reason: ${lastRescanReason || '-'}`,
-    `target plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
-    `overlay plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
-    `target image pixels: ${TARGET_IMAGE_WIDTH} x ${TARGET_IMAGE_HEIGHT}`,
-    `target aspect: ${TARGET_ASPECT}`,
+    `target plane: ${activeTargetWidth} x ${activeTargetHeight}`,
+    `overlay plane: ${activeTargetWidth} x ${activeTargetHeight}`,
+    `target image pixels: ${activeTargetImageWidth} x ${activeTargetImageHeight}`,
+    `target aspect: ${activeTargetAspect}`,
     `scan guide aspect: ${formatDebugNumber(guideAspect)}`,
-    `hotspot coordinate aspect: ${TARGET_ASPECT}`,
+    `hotspot coordinate aspect: ${activeTargetAspect}`,
     `calibration ox/oy/sx/sy/rz: ${overlayCalibration.offsetX}/${overlayCalibration.offsetY}/${overlayCalibration.scaleX}/${overlayCalibration.scaleY}/${overlayCalibration.rotationZ}`,
+    `content transform x/y/sx/sy/rz: ${getContentTransformForMode(activeContentMode).offsetX}/${getContentTransformForMode(activeContentMode).offsetY}/${getContentTransformForMode(activeContentMode).scaleX}/${getContentTransformForMode(activeContentMode).scaleY}/${getContentTransformForMode(activeContentMode).rotationZ}`,
     `text overlay opacity: ${textOverlayOpacity}`,
     `section overlay visible: ${mainSectionOverlay ? 'yes' : 'no'}`,
     `arRoot matrix: ${arRootRef ? formatMatrix(arRootRef.matrixWorld) : '-'}`,
@@ -1219,7 +1317,7 @@ function updateDebugPanel(stats: PoseStats) {
     `guide fallback used: ${scanGuideFallbackUsed ? 'yes' : 'no'}`,
     `guide visible: ${scanGuide.classList.contains('hidden') ? 'no' : 'yes'}`,
     `guide opacity: ${getComputedStyle(scanGuide).opacity}`,
-    `uses empty gyorido guide: yes`,
+    `uses empty gyorido guide: ${activeScanGuideImagePath === TARGET_EMPTY_GUIDE_IMAGE_PATH ? 'yes' : 'no'}`,
     `uses fake geometry: no`,
     '',
     '[interaction]',
@@ -1304,17 +1402,19 @@ function updateDebugPanel(stats: PoseStats) {
   ].join('\n');
 }
 
-const targetCornerPoints = [
-  new THREE.Vector3(-TARGET_WIDTH / 2, TARGET_HEIGHT / 2, 0),
-  new THREE.Vector3(TARGET_WIDTH / 2, TARGET_HEIGHT / 2, 0),
-  new THREE.Vector3(TARGET_WIDTH / 2, -TARGET_HEIGHT / 2, 0),
-  new THREE.Vector3(-TARGET_WIDTH / 2, -TARGET_HEIGHT / 2, 0),
-];
+function getTargetCornerPoints() {
+  return [
+    new THREE.Vector3(-activeTargetWidth / 2, activeTargetHeight / 2, 0),
+    new THREE.Vector3(activeTargetWidth / 2, activeTargetHeight / 2, 0),
+    new THREE.Vector3(activeTargetWidth / 2, -activeTargetHeight / 2, 0),
+    new THREE.Vector3(-activeTargetWidth / 2, -activeTargetHeight / 2, 0),
+  ];
+}
 
 function projectCorners(matrix: THREE.Matrix4, camera: THREE.Camera, renderer: THREE.WebGLRenderer) {
   const rect = renderer.domElement.getBoundingClientRect();
 
-  return targetCornerPoints.map((corner) => {
+  return getTargetCornerPoints().map((corner) => {
     const projected = corner.clone().applyMatrix4(matrix).project(camera);
     return {
       x: (projected.x * 0.5 + 0.5) * rect.width + rect.left,
@@ -1375,6 +1475,41 @@ async function loadOverlayTexture() {
   return texture;
 }
 
+function loadImageDimensions(path: string): Promise<{ width: number; height: number; path: string }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+
+    image.onload = () => {
+      resolve({
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        path,
+      });
+    };
+
+    image.onerror = () => reject(new Error(`Failed to load target image: ${path}`));
+    image.src = assetUrl(path);
+  });
+}
+
+async function applyActiveTargetPlaneFromImage(mode: TargetMode) {
+  const imagePath = getTargetImagePath(mode);
+
+  try {
+    const imageInfo = await loadImageDimensions(imagePath);
+    setActiveTargetPlaneDimensions(imageInfo.width, imageInfo.height);
+    return imageInfo;
+  } catch (error) {
+    console.warn('Failed to read target image dimensions. Using default 1000:1415 plane.', error);
+    setActiveTargetPlaneDimensions(TARGET_IMAGE_WIDTH, TARGET_IMAGE_HEIGHT);
+    return {
+      width: TARGET_IMAGE_WIDTH,
+      height: TARGET_IMAGE_HEIGHT,
+      path: TARGET_IMAGE_PATH,
+    };
+  }
+}
+
 function createLabelSprite(text: string, color: THREE.Color) {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -1412,10 +1547,10 @@ function createLabelSprite(text: string, color: THREE.Color) {
 }
 
 function getSectionRect(section: DoctrineSection, padding = 0) {
-  const width = section.hotspot.nw * TARGET_WIDTH + padding * 2;
-  const height = section.hotspot.nh * TARGET_HEIGHT + padding * 2;
-  const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * TARGET_WIDTH;
-  const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * TARGET_HEIGHT;
+  const width = section.hotspot.nw * activeTargetWidth + padding * 2;
+  const height = section.hotspot.nh * activeTargetHeight + padding * 2;
+  const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * activeTargetWidth;
+  const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * activeTargetHeight;
   return { centerX, centerY, width, height };
 }
 
@@ -1436,8 +1571,8 @@ function createAlignmentDebugGroup() {
     depthTest: false,
     depthWrite: false,
   });
-  const halfWidth = TARGET_WIDTH / 2;
-  const halfHeight = TARGET_HEIGHT / 2;
+  const halfWidth = activeTargetWidth / 2;
+  const halfHeight = activeTargetHeight / 2;
   const z = 0.016;
   const outlineGeometry = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(-halfWidth, halfHeight, z),
@@ -1906,7 +2041,7 @@ async function startAR() {
   hasStarted = true;
   lastErrorMessage = '';
   startButton.disabled = true;
-  startButton.textContent = '카메라 준비 중';
+  startButton.textContent = '스캔 준비 중';
   setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
 
   try {
@@ -1923,14 +2058,22 @@ async function startAR() {
     });
     activeTargetMode = targetMind.mode;
     activeTargetMindPath = targetMind.path;
-    activeScanGuideImagePath = getScanGuideImagePath();
+    const targetImageInfo = await applyActiveTargetPlaneFromImage(activeTargetMode);
+    activeContentMode = activeTargetMode === 'multi' ? getModeForTargetIndex(0) : activeTargetMode;
+    activeScanGuideImagePath = getScanGuideImagePath(activeTargetMode);
     scanGuideImage.src = assetUrl(activeScanGuideImagePath);
-    textOverlayOpacity =
-      activeTargetMode === 'hanja'
-        ? HANJA_TEXT_OVERLAY_OPACITY
-        : activeTargetMode === 'original'
-          ? ORIGINAL_TEXT_OVERLAY_OPACITY
-          : 1;
+    textOverlayOpacity = getTextOverlayOpacity(activeContentMode);
+    console.log('WonXR target image plane resolved', {
+      targetImagePath: targetImageInfo.path,
+      targetImageWidth: targetImageInfo.width,
+      targetImageHeight: targetImageInfo.height,
+      targetAspect: activeTargetAspect,
+      targetPlaneWidth: activeTargetWidth,
+      targetPlaneHeight: activeTargetHeight,
+      contentMode: activeContentMode,
+      contentTransform: getContentTransformForMode(activeContentMode),
+      textOverlayOpacity,
+    });
     loadedSectionCount = doctrineSections.length;
     selectionTextureSource = overlayTexture;
 
@@ -2032,7 +2175,7 @@ async function startAR() {
     overlayContentGroup = new THREE.Group();
     arRoot.add(overlayContentGroup);
 
-    const overlayGeometry = new THREE.PlaneGeometry(TARGET_WIDTH, TARGET_HEIGHT);
+    const overlayGeometry = new THREE.PlaneGeometry(activeTargetWidth, activeTargetHeight);
     const overlayMaterial = new THREE.MeshBasicMaterial({
       map: overlayTexture,
       transparent: true,
@@ -2074,8 +2217,16 @@ async function startAR() {
     for (const { targetIndex, anchor } of anchors) {
       anchor.onTargetFound = () => {
         const now = performance.now();
+        const nextContentMode = getModeForTargetIndex(targetIndex);
+        const didChangeContentMode = activeContentMode !== nextContentMode;
         activeAnchorRoot = anchor.group;
         recognizedTargetIndex = targetIndex;
+        activeContentMode = nextContentMode;
+        textOverlayOpacity = getTextOverlayOpacity(activeContentMode);
+        if (didChangeContentMode) {
+          clearSelectedSection(false, 'target content mode changed');
+        }
+        applyOverlayCalibration();
         isTargetFound = true;
         poseStats.foundCount += 1;
         lastSeenAt = now;
