@@ -12,6 +12,7 @@ npm run dev
 
 로컬 개발 서버는 기본적으로 `http://localhost:5173/`에서 실행됩니다.
 카메라는 HTTPS 또는 localhost 보안 컨텍스트에서만 사용할 수 있습니다.
+실제 모바일 카메라 테스트는 HTTPS가 적용된 GitHub Pages 배포 주소에서 진행하는 것을 권장합니다.
 
 ## 빌드
 
@@ -31,9 +32,10 @@ npm run build
 2. `Build and deployment`의 `Source`를 `GitHub Actions`로 설정합니다.
 3. `main` 브랜치에 push하면 workflow가 자동 실행됩니다.
 4. workflow는 `npm ci`, `npm run build`를 실행한 뒤 `dist/` 폴더를 GitHub Pages에 배포합니다.
-5. 저장소 이름이 `WonXR`이면 배포 URL은 일반적으로 `https://<계정명>.github.io/WonXR/` 형식입니다.
+5. 현재 배포 주소는 `https://cybox-digital-entertainment.github.io/WonXR/`입니다.
 
 수동으로 다시 배포해야 할 때는 GitHub의 `Actions` 탭에서 `Deploy GitHub Pages` workflow를 선택한 뒤 `Run workflow`를 실행합니다.
+배포 단계가 일시적으로 실패하면 같은 workflow run을 재실행하거나 `Run workflow`로 수동 재배포할 수 있습니다.
 
 ## 파일 구조
 
