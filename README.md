@@ -26,16 +26,17 @@ npm run build
 
 ## GitHub Pages 배포
 
-이 프로젝트는 `.github/workflows/deploy.yml` GitHub Actions workflow로 배포합니다.
+이 프로젝트는 `.github/workflows/deploy.yml` workflow로 `dist/` 빌드 결과를 `gh-pages` 브랜치 루트에 배포합니다.
+기존 GitHub Actions Source 방식은 `actions/deploy-pages` 단계가 반복 실패했기 때문에 사용하지 않습니다.
 
 1. GitHub 저장소의 `Settings` > `Pages`로 이동합니다.
-2. `Build and deployment`의 `Source`를 `GitHub Actions`로 설정합니다.
-3. `main` 브랜치에 push하면 workflow가 자동 실행됩니다.
-4. workflow는 `npm ci`, `npm run build`를 실행한 뒤 `dist/` 폴더를 GitHub Pages에 배포합니다.
-5. 현재 배포 주소는 `https://cybox-digital-entertainment.github.io/WonXR/`입니다.
+2. `Build and deployment`의 `Source`를 `Deploy from a branch`로 설정합니다.
+3. `Branch`는 `gh-pages`, `Folder`는 `/root`로 선택합니다.
+4. `main` 브랜치에 push하면 workflow가 `npm ci`, `npm run build`를 실행합니다.
+5. workflow는 `dist/` 폴더 내용을 `gh-pages` 브랜치 루트로 push합니다.
+6. 배포 주소는 `https://cybox-digital-entertainment.github.io/WonXR/`입니다.
 
-수동으로 다시 배포해야 할 때는 GitHub의 `Actions` 탭에서 `Deploy GitHub Pages` workflow를 선택한 뒤 `Run workflow`를 실행합니다.
-배포 단계가 일시적으로 실패하면 같은 workflow run을 재실행하거나 `Run workflow`로 수동 재배포할 수 있습니다.
+수동으로 다시 배포해야 할 때는 GitHub의 `Actions` 탭에서 `Deploy Vite app to gh-pages branch` workflow를 선택한 뒤 `Run workflow`를 실행합니다.
 
 ## 파일 구조
 
