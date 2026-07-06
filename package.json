@@ -1,0 +1,20 @@
+{
+  "name": "wonxr",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "mind-ar": "^1.2.5",
+    "three": "^0.150.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.150.0",
+    "typescript": "^6.0.3",
+    "vite": "^6.4.3"
+  }
+}

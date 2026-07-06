@@ -1,0 +1,54 @@
+# WonXR 교리도 WebAR MVP
+
+Vite + TypeScript + Three.js + MindAR 기반 WebAR MVP입니다.
+카메라가 `gyorido_empty.mind` 타깃을 인식하면 같은 비율의 투명 PNG 오버레이를 타깃 위에 표시합니다.
+
+## 실행 방법
+
+```bash
+npm install
+npm run dev
+```
+
+로컬 개발 서버는 기본적으로 `http://localhost:5173/`에서 실행됩니다.
+카메라는 HTTPS 또는 localhost 보안 컨텍스트에서만 사용할 수 있습니다.
+
+## 빌드
+
+```bash
+npm run build
+```
+
+빌드 결과는 `dist/`에 생성됩니다.
+프로덕션 빌드의 Vite base는 GitHub Pages 저장소 이름을 고려해 `/WonXR/`로 설정되어 있습니다.
+로컬 개발 서버에서는 `/` 경로로 동작합니다.
+
+## GitHub Pages 배포
+
+1. `npm run build`를 실행합니다.
+2. GitHub Pages의 배포 소스를 GitHub Actions 또는 `dist/` 배포 방식으로 설정합니다.
+3. 저장소 이름이 `WonXR`이면 배포 URL은 일반적으로 `https://<계정명>.github.io/WonXR/` 형식입니다.
+
+## 파일 구조
+
+```text
+public/
+  targets/
+    gyorido_empty.png
+    gyorido_empty.mind
+  overlays/
+    gyorido_text_overlay.png
+src/
+  main.ts
+  styles.css
+  vite-env.d.ts
+index.html
+vite.config.ts
+```
+
+## 구현 메모
+
+- `gyorido_empty.png`와 `gyorido_text_overlay.png`는 `1000x1415` 동일 비율입니다.
+- 오버레이 평면은 MindAR 타깃 폭 `1`, 높이 `1.415`로 표시합니다.
+- 투명 PNG를 그대로 사용하며 리사이즈나 크롭은 하지 않습니다.
+- `mind-ar` 패키지는 브라우저 실행에 필요 없는 `canvas` 네이티브 빌드 의존성을 포함합니다. Windows/Node 22 환경에서 설치 실패가 날 수 있어 프로젝트 `.npmrc`에서 설치 스크립트를 건너뛰도록 설정했습니다.
