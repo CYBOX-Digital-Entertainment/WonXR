@@ -1,7 +1,7 @@
 # WonXR 교리도 WebAR Prototype
 
 WonXR은 원불교 교리도 이미지를 인식하여 교리 구조를 증강현실로 보여주는 공모전용 WebAR 프로토타입입니다.
-기본 타깃은 v2 패턴이 들어간 `gyorido_empty_v2.mind`이며, 구역을 터치하면 선택 영역이 3D 블록처럼 떠오르고 하단 설명 카드가 표시됩니다.
+기본 타깃은 v2 패턴이 들어간 `gyorido_empty_v2.mind`이며, 인쇄된 교리도가 카메라 화면 안에 보이는 동안 구역을 터치하면 선택 영역이 3D 블록처럼 떠오르고 하단 설명 카드가 표시됩니다.
 
 ## Official Links
 
@@ -25,11 +25,15 @@ https://cybox-digital-entertainment.github.io/WonXR/?mode=debug
 2. Main demo를 iPhone Safari 또는 Android Chrome/Samsung Internet에서 엽니다.
 3. 카메라 권한을 허용합니다.
 4. 중앙의 실제 교리도 타깃 이미지 기반 흑백 pulsing guide에 교리도 전체를 맞춥니다.
-5. 인식 후 `스캔 종료` 버튼이 나타나면 위치가 맞는지 확인하고 누릅니다.
-6. 배치가 완료되면 원하는 구역을 터치합니다.
+5. 인식 후에도 인쇄된 교리도가 카메라 화면 안에 계속 보이도록 유지합니다.
+6. 원하는 구역을 터치합니다.
 7. 선택 구역의 raised 3D block과 하단 설명 카드가 나타나는지 확인합니다.
-8. 위치가 어긋나면 `재스캔`을 누르고 다시 맞춥니다.
+8. 인식이 끊기면 `다시 스캔`을 누르고 교리도를 다시 화면 안에 맞춥니다.
 9. 3D 느낌은 20-35도 정도의 완만한 각도에서 확인하고, 너무 낮은 측면 각도는 피합니다.
+
+이 WebAR 버전은 MindAR 이미지 타깃 추적을 사용합니다.
+교리도 출력물이 카메라 화면 안에 있을 때 가장 안정적으로 작동하며, 카메라가 교리도를 완전히 벗어나면 실제 ARCore/ARKit처럼 물리 공간에 고정된 anchor를 유지하지 않습니다.
+교리도를 보지 않아도 유지되는 진짜 world-anchored AR은 추후 Android ARCore/native 버전에서 구현하는 방향이 적합합니다.
 
 카메라 테스트는 HTTPS가 적용된 GitHub Pages 주소에서 진행해야 합니다.
 
@@ -110,21 +114,38 @@ PWA 아이콘은 `public/icons/`에 있습니다.
 공식 링크는 Main과 Debug 두 개만 사용합니다.
 내부 테스트용 query parameter는 다음을 지원합니다.
 
-- `target`: `v2` 기본값, `v1`은 기존 빈 교리도 타깃
-- `profile`: `smooth`, `responsive`, `locked`
-- `lock`: `1`이면 고정 시연 모드
+- `target`: `v2` 기본값, `v1`, `original`, `multi` 내부 테스트 지원
+- `profile`: `smooth`, `responsive`
 - `elev`, `depth`: 선택 3D block 높이와 두께
 - `hitpad`: 모바일 터치 판정 여백
 - `cal`: 오버레이 보정 패널
+- `sections`: `0`이면 main mode 색상 구역 오버레이 숨김
 
 ## WebAR Stability Strategy
 
-- MindAR: 현재 구현의 image tracking 엔진입니다. tracking config를 조정할 수 있으며 MIT License입니다.
+- MindAR: 현재 구현의 image tracking 엔진입니다. 인쇄된 교리도 타깃이 화면 안에 있을 때 AR 콘텐츠를 타깃 평면에 정렬합니다. MIT License입니다.
 - Three.js: AR 위 3D 렌더링과 raised block 표시를 담당합니다. MIT License입니다.
 - AR.js: marker/image tracking 대안 실험 후보입니다. 현재 main bundle에는 추가하지 않고, 필요하면 별도 브랜치에서 비교합니다.
-- WebXR: iPhone Safari WebAR의 직접 대체가 아니므로 현재 기본 경로가 아닙니다. Android/ARCore 호환 브라우저 실험은 추후 검토할 수 있습니다.
+- WebXR/ARCore: 교리도를 벗어나도 유지되는 world anchor가 필요할 때 검토할 수 있습니다. iPhone Safari WebAR의 직접 대체가 아니므로 현재 기본 경로가 아닙니다.
 
 여러 AR 엔진을 main bundle에 동시에 넣지 않고, 현재 MindAR + Three.js 파이프라인을 우선 개선합니다.
+
+## Original Target Preparation
+
+교전 속 원본 교리도 이미지 인식을 테스트하려면 다음 파일을 준비합니다.
+
+1. `public/targets/gyorido_original.png`를 추가합니다.
+2. MindAR Image Targets Compiler로 원본 이미지를 컴파일합니다.
+3. 생성된 파일을 `public/targets/gyorido_original.mind`로 저장합니다.
+4. 내부 테스트는 `?target=original`로 실행합니다.
+
+여러 타깃을 하나의 파일로 실험하려면 다음 순서로 컴파일한 `public/targets/gyorido_multi.mind`를 준비합니다.
+
+1. `gyorido_empty_v2.png`
+2. `gyorido_empty.png`
+3. `gyorido_original.png`
+
+`?target=multi`는 실험용 옵션이며, 파일이 없으면 v2 타깃으로 안전하게 fallback합니다.
 
 ## File Structure
 
@@ -136,6 +157,9 @@ public/
     gyorido_empty.mind
     gyorido_empty_v2.png
     gyorido_empty_v2.mind
+    gyorido_original.png
+    gyorido_original.mind
+    gyorido_multi.mind
   overlays/gyorido_text_overlay.png
   icons/
   manifest.webmanifest

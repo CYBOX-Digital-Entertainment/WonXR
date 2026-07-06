@@ -7,10 +7,16 @@ const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
 const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
 const TARGET_IMAGE_PATH = 'targets/gyorido_empty.png';
 const TARGET_IMAGE_V2_PATH = 'targets/gyorido_empty_v2.png';
+const TARGET_ORIGINAL_MIND_PATH = 'targets/gyorido_original.mind';
+const TARGET_ORIGINAL_IMAGE_PATH = 'targets/gyorido_original.png';
+const TARGET_MULTI_MIND_PATH = 'targets/gyorido_multi.mind';
 const OVERLAY_IMAGE_PATH = 'overlays/gyorido_text_overlay.png';
 const HOTSPOT_DATA_PATH = 'data/doctrine_sections.json';
+const TARGET_IMAGE_WIDTH = 1000;
+const TARGET_IMAGE_HEIGHT = 1415;
+const TARGET_ASPECT = TARGET_IMAGE_HEIGHT / TARGET_IMAGE_WIDTH;
 const TARGET_WIDTH = 1;
-const TARGET_HEIGHT = 1415 / 1000;
+const TARGET_HEIGHT = TARGET_ASPECT;
 
 const OVERLAY_SCALE_X = 1.0;
 const OVERLAY_SCALE_Y = 1.0;
@@ -18,25 +24,21 @@ const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
 const HIT_AREA_PADDING = 0.012;
-const ELEVATION_Z = 0.065;
+const ELEVATION_Z = 0.055;
 const MAX_ELEVATION_Z = 0.12;
-const BOX_DEPTH = 0.06;
+const BOX_DEPTH = 0.045;
 const TOP_OPACITY = 0.95;
-const SIDE_OPACITY = 0.78;
+const SIDE_OPACITY = 0.82;
 const HIGHLIGHT_OPACITY = 0.2;
 const OUTLINE_OPACITY = 1.0;
 const SELECTION_ANIMATION_MS = 260;
-const FOUND_TO_PREVIEW_MS = 200;
-const MIN_FOUND_FRAMES_FOR_PLACE_BUTTON = 3;
-const SOFT_CORRECTION_ALPHA = 0.008;
-const SOFT_CORRECTION_MAX_POSITION_DELTA = 0.025;
-const SOFT_CORRECTION_MAX_ROTATION_DELTA = 0.08;
-const SOFT_CORRECTION_MAX_SCALE_DELTA = 0.05;
-const DRIFT_WARNING_FRAMES = 15;
+const MAIN_SECTION_FILL_OPACITY = 0.16;
+const MAIN_SECTION_OUTLINE_OPACITY = 0.74;
+const ORIGINAL_TEXT_OVERLAY_OPACITY = 0.15;
 
-const POSITION_SMOOTHING = 0.1;
-const ROTATION_SMOOTHING = 0.1;
-const SCALE_SMOOTHING = 0.1;
+const POSITION_SMOOTHING = 0.12;
+const ROTATION_SMOOTHING = 0.12;
+const SCALE_SMOOTHING = 0.12;
 const POSITION_DEADBAND = 0.0015;
 const ROTATION_DEADBAND = 0.0015;
 const SCALE_DEADBAND = 0.0015;
@@ -45,9 +47,6 @@ const MAX_SCALE_DELTA = 0.1;
 const MAX_ROTATION_DELTA = 0.25;
 const LOST_HOLD_MS = 1200;
 const FADE_OUT_MS = 250;
-const STABLE_LOCK_FRAMES = 20;
-const LOCK_BREAK_POSITION_DELTA = 0.06;
-const LOCK_BREAK_ROTATION_DELTA = 0.2;
 
 const TRACKING_FILTER_MIN_CF = 0.001;
 const TRACKING_FILTER_BETA = 30;
@@ -61,10 +60,25 @@ const isFullDebugMode = queryParams.get('mode') === 'debug';
 const isCalibrationMode = queryParams.get('cal') === '1';
 const isDebugMode = isFullDebugMode || queryParams.get('debug') === '1';
 const isHotspotMode = isFullDebugMode || queryParams.get('hotspots') === '1';
-const requestedTargetVersion = queryParams.get('target') === 'v1' ? 'v1' : 'v2';
-const scanGuideImagePath = requestedTargetVersion === 'v1' ? TARGET_IMAGE_PATH : TARGET_IMAGE_V2_PATH;
+const targetParam = queryParams.get('target');
+const requestedTargetMode =
+  targetParam === 'v1' || targetParam === 'original' || targetParam === 'multi' ? targetParam : 'v2';
+function getTargetGuideImagePath(mode: string) {
+  if (mode === 'v1') {
+    return TARGET_IMAGE_PATH;
+  }
+
+  if (mode === 'original') {
+    return TARGET_ORIGINAL_IMAGE_PATH;
+  }
+
+  return TARGET_IMAGE_V2_PATH;
+}
+
+const scanGuideImagePath = getTargetGuideImagePath(requestedTargetMode);
 const requestedProfile = queryParams.get('profile');
-const trackingProfile = requestedProfile === 'responsive' || requestedProfile === 'locked' ? requestedProfile : 'smooth';
+const trackingProfile = requestedProfile === 'responsive' ? requestedProfile : 'smooth';
+const mainSectionOverlay = queryParams.get('sections') !== '0';
 
 type OverlayCalibration = {
   scaleX: number;
@@ -76,9 +90,10 @@ type OverlayCalibration = {
 
 type CalibrationField = keyof OverlayCalibration;
 
-type TrackingProfile = 'smooth' | 'responsive' | 'locked';
+type TrackingProfile = 'smooth' | 'responsive';
+type TargetMode = 'v2' | 'v1' | 'original' | 'multi';
 
-type AppState = 'scan' | 'preview' | 'placed' | 'drift-warning' | 'rescan' | 'lost';
+type AppState = 'scan' | 'tracking' | 'hold' | 'lost';
 
 type ProfileSettings = {
   positionSmoothing: number;
@@ -88,7 +103,6 @@ type ProfileSettings = {
   rotationDeadband: number;
   scaleDeadband: number;
   lostHoldMs: number;
-  lockDefault: boolean;
 };
 
 type DoctrineSection = {
@@ -207,7 +221,6 @@ const profileDefaults: Record<TrackingProfile, ProfileSettings> = {
     rotationDeadband: ROTATION_DEADBAND,
     scaleDeadband: SCALE_DEADBAND,
     lostHoldMs: LOST_HOLD_MS,
-    lockDefault: false,
   },
   responsive: {
     positionSmoothing: 0.25,
@@ -217,17 +230,6 @@ const profileDefaults: Record<TrackingProfile, ProfileSettings> = {
     rotationDeadband: 0.0005,
     scaleDeadband: 0.0005,
     lostHoldMs: 400,
-    lockDefault: false,
-  },
-  locked: {
-    positionSmoothing: 0.06,
-    rotationSmoothing: 0.06,
-    scaleSmoothing: 0.06,
-    positionDeadband: POSITION_DEADBAND,
-    rotationDeadband: ROTATION_DEADBAND,
-    scaleDeadband: SCALE_DEADBAND,
-    lostHoldMs: 1200,
-    lockDefault: true,
   },
 };
 
@@ -262,12 +264,6 @@ const outlierSettings = {
   scale: readNonNegativeNumberParam('msd', MAX_SCALE_DELTA),
   rotation: readNonNegativeNumberParam('mrd', MAX_ROTATION_DELTA),
 };
-const lockSettings = {
-  enabled: queryParams.has('lock') ? queryParams.get('lock') === '1' : activeProfileDefaults.lockDefault,
-  stableFrames: Math.max(1, Math.round(readNonNegativeNumberParam('lockframes', STABLE_LOCK_FRAMES))),
-  breakPosition: readNonNegativeNumberParam('lbp', LOCK_BREAK_POSITION_DELTA),
-  breakRotation: readNonNegativeNumberParam('lbr', LOCK_BREAK_ROTATION_DELTA),
-};
 const hitAreaPadding = readNonNegativeNumberParam('hitpad', HIT_AREA_PADDING);
 const selectionElevation = Math.min(readNonNegativeNumberParam('elev', ELEVATION_Z), MAX_ELEVATION_Z);
 const selectionDepth = Math.min(readNonNegativeNumberParam('depth', BOX_DEPTH), MAX_ELEVATION_Z);
@@ -275,7 +271,7 @@ const compatibilityReport = getCompatibilityReport();
 
 console.log('WonXR AR config', {
   mode: isFullDebugMode ? 'debug' : 'demo',
-  targetVersion: requestedTargetVersion,
+  targetMode: requestedTargetMode,
   targetMindPath: getRequestedTargetMindPath(),
   targetMindUrl: assetUrl(getRequestedTargetMindPath()),
   scanGuidePath: scanGuideImagePath,
@@ -294,9 +290,9 @@ console.log('WonXR AR config', {
   smoothing: smoothingSettings,
   deadband: deadbandSettings,
   outlier: outlierSettings,
-  lock: lockSettings,
   hotspots: {
     enabled: isHotspotMode,
+    mainSectionOverlay,
     dataPath: HOTSPOT_DATA_PATH,
     dataUrl: assetUrl(HOTSPOT_DATA_PATH),
     hitAreaPadding,
@@ -319,20 +315,20 @@ app.innerHTML = `
   <div id="ar-container" class="ar-container" aria-hidden="true"></div>
 
   <main class="ui-overlay">
-    <section class="intro-panel" aria-live="polite">
+    <section class="intro-panel top-ui-layer" aria-live="polite">
       <p class="eyebrow">WonXR</p>
       <h1 id="intro-title">교리도 그림을 비춰주세요</h1>
       <p id="message" class="message">카메라를 시작하면 교리도 인식을 준비합니다.</p>
     </section>
 
-    <section id="scan-guide" class="scan-guide" aria-hidden="true">
+    <section id="scan-guide" class="scan-guide scan-guide-layer" aria-hidden="true">
       <img id="scan-guide-image" src="${assetUrl(scanGuideImagePath)}" alt="" />
-      <p>교리도를 이 위치에 맞춰 비춰주세요</p>
+      <p>교리도 전체가 이 영역에 들어오게 비춰주세요</p>
     </section>
 
     <button id="start-button" class="start-button" type="button">카메라 시작</button>
-    <div id="ar-bottom-controls" class="ar-bottom-controls">
-      <button id="placement-button" class="placement-button hidden" type="button">스캔 종료</button>
+    <div id="ar-bottom-controls" class="bottom-controls">
+      <button id="placement-button" class="placement-button hidden" type="button">다시 스캔</button>
     </div>
     <button id="info-button" class="info-button" type="button">정보</button>
 
@@ -384,7 +380,7 @@ app.innerHTML = `
       <pre id="debug-content"></pre>
     </section>
 
-    <section id="section-card" class="section-card hidden" aria-live="polite">
+    <section id="section-card" class="section-card info-card-layer info-card hidden" aria-live="polite">
       <div class="section-card-header">
         <div>
           <p id="section-card-kicker" class="section-card-kicker">선택 구역</p>
@@ -417,6 +413,7 @@ app.innerHTML = `
       </dl>
       <p>교리 설명 본문은 현재 작성 예정이며, 원불교 교무님 검수 후 반영 예정입니다.</p>
       <p>이 앱은 교리도 인식을 위해 카메라를 사용합니다. 카메라 영상은 서버로 업로드하지 않으며, 브라우저 내 이미지 인식과 AR 표시 용도로만 사용됩니다.</p>
+      <p>웹버전은 이미지 타깃 기반 AR입니다. 기본적으로 인식 안정성을 위해 v2 교리도 타깃을 사용합니다. 향후 교전 속 원본 교리도 이미지 인식과 Android ARCore 기반 버전을 추가로 검토합니다.</p>
       <h3>Font notice</h3>
       <p>한둥근돋움 / WON Dotum이 설치된 환경에서는 해당 서체를 우선 사용합니다. 웹 배포용 폰트 임베딩은 라이선스 확인 후 적용 예정입니다.</p>
       <h3>홈 화면에 추가</h3>
@@ -497,7 +494,8 @@ scanGuideImage.addEventListener('error', () => {
   }
 
   scanGuideFallbackUsed = true;
-  scanGuideImage.src = assetUrl(TARGET_IMAGE_PATH);
+  activeScanGuideImagePath = TARGET_IMAGE_PATH;
+  scanGuideImage.src = assetUrl(activeScanGuideImagePath);
 });
 
 let mindarThree: MindARThree | undefined;
@@ -506,14 +504,17 @@ let overlayContentGroup: THREE.Group | undefined;
 let overlayPlane: THREE.Mesh | undefined;
 let selectionGroup: THREE.Group | undefined;
 let selectionTextureSource: THREE.Texture | undefined;
-let previewRootRef: THREE.Group | undefined;
-let placedRootRef: THREE.Group | undefined;
+let arRootRef: THREE.Group | undefined;
 let activeSectionId = '';
 let activeSectionTitle = '';
 let lastTouchedSectionId = '';
 let lastTouchedSectionTitle = '';
-let activeTargetVersion = requestedTargetVersion;
+let activeTargetMode: TargetMode = requestedTargetMode;
 let activeTargetFallbackUsed = false;
+let activeTargetMindPath = getRequestedTargetMindPath();
+let activeScanGuideImagePath = scanGuideImagePath;
+let textOverlayOpacity = requestedTargetMode === 'original' ? ORIGINAL_TEXT_OVERLAY_OPACITY : 1;
+let recognizedTargetIndex = Number.NaN;
 let currentAppState: AppState = 'scan';
 let mindarStartSucceeded = false;
 let lastErrorMessage = '';
@@ -538,24 +539,14 @@ let serviceWorkerStatus = 'not registered';
 let manifestStatus = 'not checked';
 let sensorPermissionState = 'not requested';
 let deviceOrientationLabel = '-';
-let hasPlacedPose = false;
-let placedPosePosition = new THREE.Vector3();
-let placedPoseQuaternion = new THREE.Quaternion();
-let placedPoseScale = new THREE.Vector3(1, 1, 1);
-let previewPosePosition = new THREE.Vector3();
-let previewPoseQuaternion = new THREE.Quaternion();
-let previewPoseScale = new THREE.Vector3(1, 1, 1);
+let arPosePosition = new THREE.Vector3();
+let arPoseQuaternion = new THREE.Quaternion();
+let arPoseScale = new THREE.Vector3(1, 1, 1);
 let currentTargetPosition = new THREE.Vector3();
 let currentTargetQuaternion = new THREE.Quaternion();
 let currentTargetScale = new THREE.Vector3(1, 1, 1);
-let lastPoseDelta = { position: Number.NaN, rotation: Number.NaN, scale: Number.NaN };
-let softCorrectionAppliedCount = 0;
-let driftWarningCounter = 0;
 let rescanCount = 0;
 let lastRescanReason = '';
-let lastPlacementTime = 0;
-let needsRescan = false;
-let placeCurrentPose: () => void = () => undefined;
 let rescanCurrentAR: (reason?: string) => void = () => undefined;
 
 const interactionDebug = {
@@ -577,6 +568,9 @@ const debugAssetPaths = [
   TARGET_IMAGE_V2_PATH,
   TARGET_MIND_PATH,
   TARGET_IMAGE_PATH,
+  TARGET_ORIGINAL_MIND_PATH,
+  TARGET_ORIGINAL_IMAGE_PATH,
+  TARGET_MULTI_MIND_PATH,
   OVERLAY_IMAGE_PATH,
   HOTSPOT_DATA_PATH,
   'manifest.webmanifest',
@@ -594,8 +588,6 @@ const assetLoadStatus: Record<string, string> = Object.fromEntries(
 type PoseStats = {
   appState: AppState;
   found: boolean;
-  locked: boolean;
-  lockMode: boolean;
   profile: TrackingProfile;
   targetVersion: string;
   fallbackUsed: boolean;
@@ -655,31 +647,24 @@ function setUiCompact(isCompact: boolean) {
 }
 
 function updatePlacementButton() {
-  if (currentAppState === 'preview') {
-    placementButton.textContent = '스캔 종료';
+  if (currentAppState === 'tracking' || currentAppState === 'hold' || currentAppState === 'lost') {
+    placementButton.textContent = '다시 스캔';
+    placementButton.disabled = false;
     placementButton.classList.remove('hidden');
     return;
   }
 
-  if (currentAppState === 'placed' || currentAppState === 'drift-warning') {
-    placementButton.textContent = '재스캔';
-    placementButton.classList.remove('hidden');
-    return;
-  }
-
+  placementButton.disabled = true;
   placementButton.classList.add('hidden');
 }
 
 function setAppState(nextState: AppState, status: string, tone: StatusTone, detail: string) {
   currentAppState = nextState;
-  const isCompact = nextState === 'preview' || nextState === 'placed' || nextState === 'drift-warning';
+  const isCompact = nextState === 'tracking' || nextState === 'hold';
   setUiCompact(isCompact);
   introTitle.textContent = isCompact ? 'WonXR' : '교리도 그림을 비춰주세요';
-  scanGuide.classList.toggle(
-    'hidden',
-    nextState !== 'scan' && nextState !== 'rescan' && nextState !== 'lost' && nextState !== 'preview',
-  );
-  scanGuide.classList.toggle('fading', nextState === 'preview');
+  scanGuide.classList.toggle('hidden', nextState === 'tracking' || nextState === 'hold');
+  scanGuide.classList.toggle('fading', false);
   uiOverlay.dataset.state = nextState;
   updatePlacementButton();
   setStatus(status, tone, detail);
@@ -805,7 +790,7 @@ function updateRendererForViewport() {
 
 function showOrientationGuidance() {
   if (window.innerWidth > window.innerHeight) {
-    setStatus('세로 화면에서 더 안정적으로 작동합니다', 'ready', '화면 회전으로 재스캔이 필요할 수 있습니다.');
+    setStatus('세로 화면에서 더 안정적으로 작동합니다', 'ready', '교리도를 화면 안에 유지하면 더 안정적으로 보입니다.');
   }
 }
 
@@ -833,8 +818,7 @@ async function restartAR(reason: string) {
   mindarThree = undefined;
   activeRenderer = undefined;
   activeCamera = undefined;
-  previewRootRef = undefined;
-  placedRootRef = undefined;
+  arRootRef = undefined;
   overlayContentGroup = undefined;
   overlayPlane = undefined;
   selectionGroup = undefined;
@@ -857,13 +841,6 @@ function scheduleOrientationRestart(reason: string) {
   updateRendererForViewport();
   showOrientationGuidance();
   lastOrientationChangeTime = performance.now();
-
-  if (hasPlacedPose) {
-    needsRescan = true;
-    lastRestartReason = reason;
-    setAppState('drift-warning', '화면 회전으로 재스캔이 필요합니다', 'ready', '배치된 화면은 유지됩니다. 필요하면 재스캔을 누르세요.');
-    return;
-  }
 
   window.clearTimeout(orientationRestartTimer);
   orientationRestartTimer = window.setTimeout(() => {
@@ -1022,30 +999,42 @@ function assertArLayersCreated() {
 }
 
 function getRequestedTargetMindPath() {
-  return requestedTargetVersion === 'v1' ? TARGET_MIND_PATH : TARGET_MIND_V2_PATH;
+  if (requestedTargetMode === 'v1') {
+    return TARGET_MIND_PATH;
+  }
+
+  if (requestedTargetMode === 'original') {
+    return TARGET_ORIGINAL_MIND_PATH;
+  }
+
+  if (requestedTargetMode === 'multi') {
+    return TARGET_MULTI_MIND_PATH;
+  }
+
+  return TARGET_MIND_V2_PATH;
 }
 
-async function resolveTargetMindPath() {
+async function resolveTargetMindPath(): Promise<{ path: string; mode: TargetMode }> {
   const requestedTargetMindPath = getRequestedTargetMindPath();
   activeTargetFallbackUsed = false;
 
-  if (requestedTargetMindPath === TARGET_MIND_PATH) {
-    return { path: TARGET_MIND_PATH, version: 'v1' };
+  if (requestedTargetMode === 'v1') {
+    return { path: TARGET_MIND_PATH, mode: 'v1' as TargetMode };
   }
 
   try {
     const response = await fetch(assetUrl(requestedTargetMindPath), { method: 'HEAD' });
 
     if (response.ok) {
-      return { path: requestedTargetMindPath, version: 'v2' };
+      return { path: requestedTargetMindPath, mode: requestedTargetMode };
     }
   } catch (error) {
-    console.warn('Failed to check v2 target file. Falling back to default target.', error);
+    console.warn('Failed to check requested target file. Falling back to v2 target.', error);
   }
 
-  console.warn(`Target file not found: ${requestedTargetMindPath}. Falling back to ${TARGET_MIND_PATH}.`);
+  console.warn(`Target file not found: ${requestedTargetMindPath}. Falling back to ${TARGET_MIND_V2_PATH}.`);
   activeTargetFallbackUsed = true;
-  return { path: TARGET_MIND_PATH, version: 'v1' };
+  return { path: TARGET_MIND_V2_PATH, mode: 'v2' as TargetMode };
 }
 
 async function loadDoctrineSections() {
@@ -1163,19 +1152,20 @@ function updateDebugPanel(stats: PoseStats) {
     return;
   }
 
-  previewRootRef?.updateMatrixWorld(true);
-  placedRootRef?.updateMatrixWorld(true);
+  arRootRef?.updateMatrixWorld(true);
   const bottomControlsUnexpected = isBottomControlsUnexpectedlyHigh();
+  const guideAspect =
+    scanGuideImage.naturalWidth > 0 ? scanGuideImage.naturalHeight / scanGuideImage.naturalWidth : Number.NaN;
 
   debugContent.textContent = [
     '[general]',
     `app mode: ${stats.appState}`,
     `target found: ${stats.found ? 'yes' : 'no'}`,
-    `current target: ${stats.targetVersion}`,
+    `current target mode: ${stats.targetVersion}`,
+    `loaded target file: ${activeTargetMindPath}`,
     `fallback used: ${stats.fallbackUsed ? 'yes' : 'no'}`,
+    `recognized target index: ${Number.isFinite(recognizedTargetIndex) ? recognizedTargetIndex : '-'}`,
     `profile: ${stats.profile}`,
-    `lock mode: ${stats.lockMode ? 'on' : 'off'}`,
-    `locked: ${stats.locked ? 'yes' : 'no'}`,
     `active section: ${stats.activeSectionId || '-'} ${stats.activeSectionTitle || ''}`,
     `last touched: ${stats.lastTouchedSectionId || '-'} ${stats.lastTouchedSectionTitle || ''}`,
     `info card open: ${infoCardOpen ? 'yes' : 'no'}`,
@@ -1184,31 +1174,26 @@ function updateDebugPanel(stats: PoseStats) {
     `last pointer target: ${lastPointerTarget || '-'}`,
     `close blocked by debounce: ${closeBlockedByDebounce ? 'yes' : 'no'}`,
     '',
-    '[placement]',
-    `has placed pose: ${hasPlacedPose ? 'yes' : 'no'}`,
-    `placed root visible: ${placedRootRef?.visible ? 'yes' : 'no'}`,
-    `preview root visible: ${previewRootRef?.visible ? 'yes' : 'no'}`,
-    `placed pos: ${formatDebugNumber(placedPosePosition.x)}, ${formatDebugNumber(placedPosePosition.y)}, ${formatDebugNumber(placedPosePosition.z)}`,
-    `placed rot z: ${formatDebugNumber(getQuaternionZDegrees(placedPoseQuaternion))}deg`,
-    `placed scale: ${formatDebugNumber(getScaleScalar(placedPoseScale))}`,
-    `preview pos: ${formatDebugNumber(previewPosePosition.x)}, ${formatDebugNumber(previewPosePosition.y)}, ${formatDebugNumber(previewPosePosition.z)}`,
-    `preview rot z: ${formatDebugNumber(getQuaternionZDegrees(previewPoseQuaternion))}deg`,
-    `preview scale: ${formatDebugNumber(getScaleScalar(previewPoseScale))}`,
+    '[image target]',
+    `arRoot visible: ${arRootRef?.visible ? 'yes' : 'no'}`,
+    `arRoot pos: ${formatDebugNumber(arPosePosition.x)}, ${formatDebugNumber(arPosePosition.y)}, ${formatDebugNumber(arPosePosition.z)}`,
+    `arRoot rot z: ${formatDebugNumber(getQuaternionZDegrees(arPoseQuaternion))}deg`,
+    `arRoot scale: ${formatDebugNumber(getScaleScalar(arPoseScale))}`,
     `target pos: ${formatDebugNumber(currentTargetPosition.x)}, ${formatDebugNumber(currentTargetPosition.y)}, ${formatDebugNumber(currentTargetPosition.z)}`,
     `target rot z: ${formatDebugNumber(getQuaternionZDegrees(currentTargetQuaternion))}deg`,
     `target scale: ${formatDebugNumber(getScaleScalar(currentTargetScale))}`,
-    `delta from placed: p ${formatDebugNumber(lastPoseDelta.position)}, r ${formatDebugNumber(lastPoseDelta.rotation)}, s ${formatDebugNumber(lastPoseDelta.scale)}`,
-    `soft corrections: ${softCorrectionAppliedCount}`,
-    `drift counter: ${driftWarningCounter}`,
     `rescan count: ${rescanCount}`,
     `last rescan reason: ${lastRescanReason || '-'}`,
-    `last placement time: ${lastPlacementTime ? Math.round(performance.now() - lastPlacementTime) + 'ms ago' : '-'}`,
-    `needs rescan: ${needsRescan ? 'yes' : 'no'}`,
     `target plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
     `overlay plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
+    `target image pixels: ${TARGET_IMAGE_WIDTH} x ${TARGET_IMAGE_HEIGHT}`,
+    `target aspect: ${TARGET_ASPECT}`,
+    `scan guide aspect: ${formatDebugNumber(guideAspect)}`,
+    `hotspot coordinate aspect: ${TARGET_ASPECT}`,
     `calibration ox/oy/sx/sy/rz: ${overlayCalibration.offsetX}/${overlayCalibration.offsetY}/${overlayCalibration.scaleX}/${overlayCalibration.scaleY}/${overlayCalibration.rotationZ}`,
-    `placed matrix: ${placedRootRef ? formatMatrix(placedRootRef.matrixWorld) : '-'}`,
-    `preview matrix: ${previewRootRef ? formatMatrix(previewRootRef.matrixWorld) : '-'}`,
+    `text overlay opacity: ${textOverlayOpacity}`,
+    `section overlay visible: ${mainSectionOverlay ? 'yes' : 'no'}`,
+    `arRoot matrix: ${arRootRef ? formatMatrix(arRootRef.matrixWorld) : '-'}`,
     '',
     '[button/ui]',
     `bottom button: ${placementButton.classList.contains('hidden') ? '-' : placementButton.textContent?.trim() || '-'}`,
@@ -1218,7 +1203,7 @@ function updateDebugPanel(stats: PoseStats) {
     `last close reason: ${lastCloseReason || '-'}`,
     '',
     '[scan guide]',
-    `guide source image: ${scanGuideImagePath}`,
+    `guide source image: ${activeScanGuideImagePath}`,
     `guide img src: ${scanGuideImage.currentSrc || scanGuideImage.src || '-'}`,
     `guide fallback used: ${scanGuideFallbackUsed ? 'yes' : 'no'}`,
     `guide visible: ${scanGuide.classList.contains('hidden') ? 'no' : 'yes'}`,
@@ -1507,15 +1492,49 @@ function createAlignmentDebugGroup() {
 
 function createHotspotDebugGroup(sections: DoctrineSection[]) {
   const group = new THREE.Group();
+  const mainOverlayGroup = new THREE.Group();
   const debugGroup = new THREE.Group();
   const hitGroup = new THREE.Group();
   const sectionHitMeshes: THREE.Mesh[] = [];
+  mainOverlayGroup.visible = mainSectionOverlay;
   debugGroup.visible = isHotspotMode;
 
   sections.forEach((section, index) => {
     const color = getSectionColor(section);
     const { centerX, centerY, width, height } = getSectionRect(section);
     const hitRect = getSectionRect(section, hitAreaPadding);
+
+    const mainSectionGroup = new THREE.Group();
+    mainSectionGroup.position.set(centerX, centerY, 0.011);
+    const mainFillMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: MAIN_SECTION_FILL_OPACITY,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mainFill = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mainFillMaterial);
+    mainFill.renderOrder = 14;
+    mainSectionGroup.add(mainFill);
+    const mainOutlineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-width / 2, height / 2, 0.001),
+      new THREE.Vector3(width / 2, height / 2, 0.001),
+      new THREE.Vector3(width / 2, -height / 2, 0.001),
+      new THREE.Vector3(-width / 2, -height / 2, 0.001),
+    ]);
+    const mainOutlineMaterial = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: MAIN_SECTION_OUTLINE_OPACITY,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const mainOutline = new THREE.LineLoop(mainOutlineGeometry, mainOutlineMaterial);
+    mainOutline.renderOrder = 15;
+    mainSectionGroup.add(mainOutline);
+    mainOverlayGroup.add(mainSectionGroup);
+
     const sectionGroup = new THREE.Group();
     sectionGroup.position.set(centerX, centerY, 0.004);
 
@@ -1571,6 +1590,7 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
     debugGroup.add(sectionGroup);
   });
 
+  group.add(mainOverlayGroup);
   group.add(hitGroup);
   group.add(debugGroup);
 
@@ -1751,7 +1771,7 @@ function createSelectionGroup(section: DoctrineSection) {
     new THREE.Vector3(-halfWidth, -halfHeight, 0.008),
   ]);
   const outlineMaterial = new THREE.LineBasicMaterial({
-    color: '#facc15',
+    color: '#F2C400',
     transparent: true,
     opacity: OUTLINE_OPACITY,
     depthTest: false,
@@ -1817,7 +1837,7 @@ function clearSelectedSection(updateStatus = true, reason = 'close button') {
   selectionGroup = undefined;
 
   if (updateStatus) {
-    const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'rescan' || currentAppState === 'lost';
+    const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'lost';
     const status = isLostOrScanning ? '다시 교리도를 비춰주세요' : '구역을 터치해 설명을 확인하세요';
     setStatus(status, isLostOrScanning ? 'waiting' : 'found', '구역을 터치해 설명을 확인하세요');
   }
@@ -1887,10 +1907,14 @@ async function startAR() {
 
     console.log('WonXR target and hotspot data resolved', {
       targetMindPath: targetMind.path,
-      targetVersion: targetMind.version,
+      targetMode: targetMind.mode,
       sections: doctrineSections.length,
     });
-    activeTargetVersion = targetMind.version;
+    activeTargetMode = targetMind.mode;
+    activeTargetMindPath = targetMind.path;
+    activeScanGuideImagePath = getTargetGuideImagePath(activeTargetMode);
+    scanGuideImage.src = assetUrl(activeScanGuideImagePath);
+    textOverlayOpacity = activeTargetMode === 'original' ? ORIGINAL_TEXT_OVERLAY_OPACITY : 1;
     loadedSectionCount = doctrineSections.length;
     selectionTextureSource = overlayTexture;
 
@@ -1912,10 +1936,13 @@ async function startAR() {
     const { renderer, scene, camera } = mindarThree;
     activeRenderer = renderer;
     activeCamera = camera;
-    const anchor = mindarThree.addAnchor(0);
-    const anchorRoot = anchor.group;
-    const previewRoot = new THREE.Group();
-    const placedRoot = new THREE.Group();
+    const targetIndices = activeTargetMode === 'multi' ? [0, 1, 2] : [0];
+    const anchors = targetIndices.map((targetIndex) => ({
+      targetIndex,
+      anchor: mindarThree!.addAnchor(targetIndex),
+    }));
+    let activeAnchorRoot = anchors[0].anchor.group;
+    const arRoot = new THREE.Group();
     const targetPosition = new THREE.Vector3();
     const targetQuaternion = new THREE.Quaternion();
     const targetScale = new THREE.Vector3();
@@ -1929,10 +1956,8 @@ async function startAR() {
     const poseStats: PoseStats = {
       appState: currentAppState,
       found: false,
-      locked: false,
-      lockMode: lockSettings.enabled,
       profile: trackingProfile,
-      targetVersion: activeTargetVersion,
+      targetVersion: activeTargetMode,
       fallbackUsed: activeTargetFallbackUsed,
       holdMs: lostHoldMs,
       holdRemainingMs: 0,
@@ -1977,32 +2002,25 @@ async function startAR() {
     let isTargetFound = false;
     let isStableInitialized = false;
     let hasLastGoodPose = false;
-    let isPoseLocked = false;
-    let stableFrameCount = 0;
-    let foundFrameCount = 0;
     let lastGoodScaleScalar = 1;
     let overlayOpacity = 0;
     let lastSeenAt = 0;
-    let foundAt = 0;
     let hasWarnedLowAngle = false;
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
 
-    previewRoot.visible = false;
-    placedRoot.visible = false;
-    previewRootRef = previewRoot;
-    placedRootRef = placedRoot;
-    scene.add(previewRoot);
-    scene.add(placedRoot);
+    arRoot.visible = false;
+    arRootRef = arRoot;
+    scene.add(arRoot);
     overlayContentGroup = new THREE.Group();
-    previewRoot.add(overlayContentGroup);
+    arRoot.add(overlayContentGroup);
 
     const overlayGeometry = new THREE.PlaneGeometry(TARGET_WIDTH, TARGET_HEIGHT);
     const overlayMaterial = new THREE.MeshBasicMaterial({
       map: overlayTexture,
       transparent: true,
-      opacity: overlayOpacity,
+      opacity: overlayOpacity * textOverlayOpacity,
       depthTest: false,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -2020,105 +2038,58 @@ async function startAR() {
     hotspotPointerCleanup = setupHotspotPointer(
       camera,
       hitMeshes,
-      () =>
-        (currentAppState === 'preview' && previewRoot.visible) ||
-        ((currentAppState === 'placed' || currentAppState === 'drift-warning') && placedRoot.visible),
+      () => (currentAppState === 'tracking' || currentAppState === 'hold') && arRoot.visible,
       selectSection,
     );
     applyOverlayCalibration();
 
-    placeCurrentPose = () => {
-      if (!isStableInitialized || !previewRoot.visible) {
-        return;
-      }
-
-      const placedWorldPosition = new THREE.Vector3();
-      const placedWorldQuaternion = new THREE.Quaternion();
-      const placedWorldScale = new THREE.Vector3();
-
-      previewRoot.updateMatrixWorld(true);
-      previewRoot.matrixWorld.decompose(placedWorldPosition, placedWorldQuaternion, placedWorldScale);
-      placedRoot.position.copy(placedWorldPosition);
-      placedRoot.quaternion.copy(placedWorldQuaternion);
-      placedRoot.scale.copy(placedWorldScale);
-      placedRoot.updateMatrixWorld(true);
-      placedRoot.visible = true;
-      previewRoot.visible = false;
-
-      if (overlayContentGroup) {
-        overlayContentGroup.removeFromParent();
-        placedRoot.add(overlayContentGroup);
-      }
-
-      hasPlacedPose = true;
-      needsRescan = false;
-      driftWarningCounter = 0;
-      lastPoseDelta = { position: 0, rotation: 0, scale: 0 };
-      placedPosePosition.copy(placedWorldPosition);
-      placedPoseQuaternion.copy(placedWorldQuaternion);
-      placedPoseScale.copy(placedWorldScale);
-      lastPlacementTime = performance.now();
-      setAppState('placed', '배치 완료  구역을 터치하세요', 'found', '구역을 터치해 설명을 확인하세요');
-    };
-
     rescanCurrentAR = (reason = 'user rescan') => {
       rescanCount += 1;
       lastRescanReason = reason;
-      hasPlacedPose = false;
-      needsRescan = false;
-      driftWarningCounter = 0;
-      isPoseLocked = false;
-      stableFrameCount = 0;
-      foundFrameCount = 0;
       isStableInitialized = false;
       hasLastGoodPose = false;
+      recognizedTargetIndex = Number.NaN;
       overlayOpacity = 0;
       clearSelectedSection(false, reason);
+      arRoot.visible = false;
+      setAppState('scan', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
+    };
 
-      if (overlayContentGroup) {
-        overlayContentGroup.removeFromParent();
-        previewRoot.add(overlayContentGroup);
-      }
-
-      previewRoot.visible = false;
-      placedRoot.visible = false;
-      setAppState('rescan', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
-      window.setTimeout(() => {
-        if (currentAppState === 'rescan') {
-          setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
+    for (const { targetIndex, anchor } of anchors) {
+      anchor.onTargetFound = () => {
+        const now = performance.now();
+        activeAnchorRoot = anchor.group;
+        recognizedTargetIndex = targetIndex;
+        isTargetFound = true;
+        poseStats.foundCount += 1;
+        lastSeenAt = now;
+        if (hasLastGoodPose) {
+          arRoot.visible = true;
         }
-      }, 250);
-    };
+      };
 
-    anchor.onTargetFound = () => {
-      const now = performance.now();
-      isTargetFound = true;
-      poseStats.foundCount += 1;
-      foundFrameCount = 0;
-      foundAt = now;
-      lastSeenAt = now;
-      if (!hasPlacedPose) {
-        previewRoot.visible = hasLastGoodPose;
-      }
-    };
+      anchor.onTargetLost = () => {
+        if (recognizedTargetIndex !== targetIndex) {
+          return;
+        }
 
-    anchor.onTargetLost = () => {
-      isTargetFound = false;
-      poseStats.lostCount += 1;
+        isTargetFound = false;
+        poseStats.lostCount += 1;
 
-      if (hasPlacedPose) {
-        setStatus('배치 유지 중', 'found', '재스캔이 필요하면 재스캔 버튼을 누르세요.');
-      } else if (previewRoot.visible) {
-        setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
-      }
-    };
+        if (arRoot.visible) {
+          setAppState('hold', '인식 유지 중', 'ready', '웹버전은 교리도가 화면 안에 있을 때 가장 안정적입니다.');
+        } else {
+          setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
+        }
+      };
+    }
 
     await mindarThree.start();
     mindarStartSucceeded = true;
     assertArLayersCreated();
 
     startButton.classList.add('hidden');
-    setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
+    setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
 
     renderer.setAnimationLoop(() => {
       const now = performance.now();
@@ -2134,8 +2105,8 @@ async function startAR() {
       let hasRawPose = false;
 
       if (isTargetFound) {
-        anchorRoot.updateMatrixWorld(true);
-        rawMatrix.copy(anchorRoot.matrixWorld);
+        activeAnchorRoot.updateMatrixWorld(true);
+        rawMatrix.copy(activeAnchorRoot.matrixWorld);
         rawMatrix.decompose(targetPosition, targetQuaternion, targetScale);
         hasRawPose = true;
 
@@ -2147,7 +2118,6 @@ async function startAR() {
         currentTargetPosition.copy(targetPosition);
         currentTargetQuaternion.copy(targetQuaternion);
         currentTargetScale.copy(targetScale);
-        foundFrameCount += 1;
 
         const rejectReason = hasLastGoodPose
           ? getPoseRejectReason(
@@ -2174,117 +2144,49 @@ async function startAR() {
           poseStats.lastRejectReason = '';
         }
 
-        if (acceptedPose && hasPlacedPose) {
-          const placedDelta = getPoseDelta(
-            lastGoodPosition,
-            lastGoodQuaternion,
-            lastGoodScale,
-            placedRoot.position,
-            placedRoot.quaternion,
-            placedRoot.scale,
-          );
-          lastPoseDelta = placedDelta;
-
-          if (
-            placedDelta.position < SOFT_CORRECTION_MAX_POSITION_DELTA &&
-            placedDelta.rotation < SOFT_CORRECTION_MAX_ROTATION_DELTA &&
-            placedDelta.scale < SOFT_CORRECTION_MAX_SCALE_DELTA
-          ) {
-            placedRoot.position.lerp(lastGoodPosition, SOFT_CORRECTION_ALPHA);
-            placedRoot.quaternion.slerp(lastGoodQuaternion, SOFT_CORRECTION_ALPHA);
-            placedRoot.scale.lerp(lastGoodScale, SOFT_CORRECTION_ALPHA);
-            placedPosePosition.copy(placedRoot.position);
-            placedPoseQuaternion.copy(placedRoot.quaternion);
-            placedPoseScale.copy(placedRoot.scale);
-            softCorrectionAppliedCount += 1;
-            driftWarningCounter = 0;
-
-            if (currentAppState === 'drift-warning') {
-              needsRescan = false;
-              setAppState('placed', '배치 완료  구역을 터치하세요', 'found', '구역을 터치해 설명을 확인하세요');
-            }
-          } else {
-            driftWarningCounter += 1;
-
-            if (driftWarningCounter >= DRIFT_WARNING_FRAMES && currentAppState !== 'drift-warning') {
-              needsRescan = true;
-              setAppState(
-                'drift-warning',
-                '위치가 어긋났습니다  재스캔해주세요',
-                'ready',
-                '위치가 어긋났습니다. 재스캔해주세요.',
-              );
-            }
-          }
-        } else if (acceptedPose && !isStableInitialized) {
-          previewRoot.position.copy(lastGoodPosition);
-          previewRoot.quaternion.copy(lastGoodQuaternion);
-          previewRoot.scale.copy(lastGoodScale);
+        if (acceptedPose && !isStableInitialized) {
+          arRoot.position.copy(lastGoodPosition);
+          arRoot.quaternion.copy(lastGoodQuaternion);
+          arRoot.scale.copy(lastGoodScale);
           isStableInitialized = true;
-          stableFrameCount = 0;
           overlayOpacity = 1;
+          arRoot.visible = true;
+          setAppState('tracking', '인식됨  구역을 터치하세요', 'found', '교리도를 화면 안에 유지하면 더 안정적으로 보입니다.');
         } else if (acceptedPose) {
           const stableDelta = getPoseDelta(
             lastGoodPosition,
             lastGoodQuaternion,
             lastGoodScale,
-            previewRoot.position,
-            previewRoot.quaternion,
-            previewRoot.scale,
+            arRoot.position,
+            arRoot.quaternion,
+            arRoot.scale,
           );
 
-          if (
-            isPoseLocked &&
-            (stableDelta.position > lockSettings.breakPosition || stableDelta.rotation > lockSettings.breakRotation)
-          ) {
-            isPoseLocked = false;
-            stableFrameCount = 0;
+          if (stableDelta.position > deadbandSettings.position) {
+            arRoot.position.lerp(lastGoodPosition, smoothingSettings.position);
           }
 
-          if (isPoseLocked) {
-            overlayOpacity += (1 - overlayOpacity) * 0.25;
-          } else {
-            const didMovePosition = stableDelta.position > deadbandSettings.position;
-            const didMoveRotation = stableDelta.rotation > deadbandSettings.rotation;
-            const didMoveScale = stableDelta.scale > deadbandSettings.scale;
+          if (stableDelta.rotation > deadbandSettings.rotation) {
+            arRoot.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
+          }
 
-            if (didMovePosition) {
-              previewRoot.position.lerp(lastGoodPosition, smoothingSettings.position);
-            }
+          if (stableDelta.scale > deadbandSettings.scale) {
+            arRoot.scale.lerp(lastGoodScale, smoothingSettings.scale);
+          }
 
-            if (didMoveRotation) {
-              previewRoot.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
-            }
+          overlayOpacity += (1 - overlayOpacity) * 0.25;
+          arRoot.visible = true;
 
-            if (didMoveScale) {
-              previewRoot.scale.lerp(lastGoodScale, smoothingSettings.scale);
-            }
-
-            const isQuietFrame = !didMovePosition && !didMoveRotation && !didMoveScale;
-            stableFrameCount = lockSettings.enabled && isQuietFrame ? stableFrameCount + 1 : 0;
-
-            if (lockSettings.enabled && stableFrameCount >= lockSettings.stableFrames) {
-              isPoseLocked = true;
-            }
-
-            overlayOpacity += (1 - overlayOpacity) * 0.25;
+          if (currentAppState !== 'tracking') {
+            setAppState('tracking', '인식됨  구역을 터치하세요', 'found', '교리도를 화면 안에 유지하면 더 안정적으로 보입니다.');
           }
         }
 
         if (hasLastGoodPose) {
-          previewRoot.visible = !hasPlacedPose;
-          previewPosePosition.copy(previewRoot.position);
-          previewPoseQuaternion.copy(previewRoot.quaternion);
-          previewPoseScale.copy(previewRoot.scale);
-        }
-
-        if (
-          !hasPlacedPose &&
-          hasLastGoodPose &&
-          (currentAppState === 'scan' || currentAppState === 'rescan' || currentAppState === 'lost') &&
-          (now - foundAt >= FOUND_TO_PREVIEW_MS || foundFrameCount >= MIN_FOUND_FRAMES_FOR_PLACE_BUTTON)
-        ) {
-          setAppState('preview', '인식됨  위치가 맞으면 스캔 종료를 누르세요', 'found', '위치가 맞으면 스캔 종료를 누르세요');
+          arRoot.visible = true;
+          arPosePosition.copy(arRoot.position);
+          arPoseQuaternion.copy(arRoot.quaternion);
+          arPoseScale.copy(arRoot.scale);
         }
       } else {
         poseStats.found = false;
@@ -2293,31 +2195,28 @@ async function startAR() {
       if (hasLastGoodPose && !acceptedPose) {
         const elapsedSinceGoodPose = now - lastSeenAt;
 
-        if (hasPlacedPose) {
-          placedRoot.visible = true;
-          overlayOpacity = 1;
+        if (elapsedSinceGoodPose <= lostHoldMs) {
+          arRoot.visible = true;
+          overlayOpacity = Math.max(overlayOpacity, 0.72);
 
-          if (!isTargetFound && currentAppState === 'placed') {
-            setStatus('배치 유지 중', 'found', '재스캔이 필요하면 재스캔 버튼을 누르세요.');
+          if (!isTargetFound && currentAppState !== 'hold') {
+            setAppState('hold', '인식 유지 중', 'ready', '웹버전은 교리도가 화면 안에 있을 때 가장 안정적입니다.');
           }
-        } else if (elapsedSinceGoodPose <= lostHoldMs) {
-          previewRoot.visible = true;
-          overlayOpacity = Math.max(overlayOpacity, 1);
         } else {
           overlayOpacity = 0;
-          previewRoot.visible = false;
+          arRoot.visible = false;
           isStableInitialized = false;
           hasLastGoodPose = false;
           clearSelectedSection(false, 'target lost timeout');
 
           if (currentAppState !== 'lost') {
-            setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
+            setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
           }
         }
       }
 
-      overlayMaterial.opacity = overlayOpacity;
-      const visibleRoot = hasPlacedPose ? placedRoot : previewRoot;
+      overlayMaterial.opacity = overlayOpacity * textOverlayOpacity;
+      const visibleRoot = arRoot;
       const rawStableDelta = hasRawPose
         ? getPoseDelta(targetPosition, targetQuaternion, targetScale, visibleRoot.position, visibleRoot.quaternion, visibleRoot.scale)
         : { position: Number.NaN, rotation: Number.NaN, scale: Number.NaN };
@@ -2326,19 +2225,13 @@ async function startAR() {
       camera.getWorldDirection(cameraDirection).normalize();
       const viewingDot = Math.abs(THREE.MathUtils.clamp(stableNormal.dot(cameraDirection), -1, 1));
       const viewingAngleDeg = THREE.MathUtils.radToDeg(Math.acos(viewingDot));
-      const holdRemainingMs = hasPlacedPose
-        ? Number.POSITIVE_INFINITY
-        : hasLastGoodPose && !isTargetFound
-          ? Math.max(lostHoldMs - (now - lastSeenAt), 0)
-          : 0;
+      const holdRemainingMs = hasLastGoodPose && !isTargetFound ? Math.max(lostHoldMs - (now - lastSeenAt), 0) : 0;
       const videoExists = arContainer.querySelector('video') !== null;
       const canvasExists = arContainer.querySelector('canvas') !== null;
       const warningMessages = [
-        activeTargetFallbackUsed ? 'fallback to v1' : '',
+        activeTargetFallbackUsed ? 'target fallback used' : '',
         !videoExists ? 'no video element' : '',
         !canvasExists ? 'no canvas element' : '',
-        hasPlacedPose && placedRoot.parent !== scene ? 'placedRoot following raw anchor unexpectedly' : '',
-        hasPlacedPose && !placedRoot.visible ? 'target lost but placedRoot hidden' : '',
         isBottomControlsUnexpectedlyHigh() ? 'rescan button not in bottom controls' : '',
         scanGuideFallbackUsed ? 'scan guide target image fallback used' : '',
         scanGuideImage.complete && scanGuideImage.naturalWidth === 0 ? 'scan guide source missing' : '',
@@ -2348,14 +2241,12 @@ async function startAR() {
         overlayCalibration.scaleX !== 1 ||
         overlayCalibration.scaleY !== 1 ||
         overlayCalibration.rotationZ !== 0
-          ? 'placement alignment offset non-neutral'
+          ? 'overlay alignment offset non-neutral'
           : '',
         poseStats.rejectedFrames > 12 ? 'pose outlier too frequent' : '',
-        poseStats.lostCount > 4 && !hasPlacedPose ? 'target lost too often' : '',
-        hasPlacedPose && !isTargetFound ? 'target lost but placement held' : '',
+        poseStats.lostCount > 4 ? 'target lost too often' : '',
+        currentAppState === 'hold' ? 'target lost: holding last image-target pose briefly' : '',
         lastOrientationChangeTime ? 'orientation changed' : '',
-        needsRescan ? 'needs rescan' : '',
-        driftWarningCounter >= DRIFT_WARNING_FRAMES ? 'pose drift too large' : '',
         viewingAngleDeg > 50 && visibleRoot.visible ? 'viewing angle too low' : '',
         !overlayTexture ? 'overlay not loaded' : '',
         doctrineSections.length === 0 ? 'doctrine_sections.json not loaded' : '',
@@ -2379,9 +2270,7 @@ async function startAR() {
       poseStats.smoothedCenterY = visibleRoot.position.y;
       poseStats.smoothedScale = getScaleScalar(visibleRoot.scale);
       poseStats.smoothedRotationDeg = getQuaternionZDegrees(visibleRoot.quaternion);
-      poseStats.locked = isPoseLocked;
-      poseStats.lockMode = lockSettings.enabled;
-      poseStats.targetVersion = activeTargetVersion;
+      poseStats.targetVersion = activeTargetMode;
       poseStats.fallbackUsed = activeTargetFallbackUsed;
       poseStats.holdRemainingMs = holdRemainingMs;
       poseStats.hitMeshCount = hitMeshes.length;
@@ -2429,8 +2318,7 @@ async function startAR() {
     hotspotPointerCleanup = undefined;
     overlayContentGroup = undefined;
     overlayPlane = undefined;
-    previewRootRef = undefined;
-    placedRootRef = undefined;
+    arRootRef = undefined;
     selectionGroup = undefined;
     hasStarted = false;
     setUiCompact(false);
@@ -2543,12 +2431,5 @@ startButton.addEventListener('click', () => {
 });
 
 placementButton.addEventListener('click', () => {
-  if (currentAppState === 'preview') {
-    placeCurrentPose();
-    return;
-  }
-
-  if (currentAppState === 'placed' || currentAppState === 'drift-warning') {
-    rescanCurrentAR('user rescan');
-  }
+  rescanCurrentAR('user rescan');
 });

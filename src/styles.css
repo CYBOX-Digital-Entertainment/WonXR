@@ -291,19 +291,19 @@ h1 {
   display: none;
 }
 
-.ar-bottom-controls {
+.bottom-controls {
   position: fixed;
   left: 0;
   right: 0;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-  z-index: 40;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
   pointer-events: none;
 }
 
-.ar-bottom-controls button {
+.bottom-controls button {
   pointer-events: auto;
 }
 
@@ -544,11 +544,11 @@ h1 {
 }
 
 .section-card {
-  position: absolute;
+  position: fixed;
   left: 12px;
   right: 12px;
   bottom: calc(env(safe-area-inset-bottom) + 68px);
-  z-index: 13;
+  z-index: 35;
   max-height: min(42vh, 330px);
   overflow: auto;
   padding: 14px;
@@ -557,6 +557,14 @@ h1 {
     linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 34%),
     rgba(28, 24, 40, 0.78);
   color: var(--text-primary);
+  pointer-events: auto;
+}
+
+.info-card-layer {
+  pointer-events: none;
+}
+
+.info-card {
   pointer-events: auto;
 }
 
