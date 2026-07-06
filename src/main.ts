@@ -56,6 +56,7 @@ const MAX_SCALE_DELTA = 0.1;
 const MAX_ROTATION_DELTA = 0.25;
 const LOST_HOLD_MS = 1200;
 const FADE_OUT_MS = 250;
+const RESCAN_SUPPRESS_MS = 1400;
 
 const TRACKING_FILTER_MIN_CF = 0.001;
 const TRACKING_FILTER_BETA = 30;
@@ -755,13 +756,15 @@ function updatePlacementButton() {
 function setAppState(nextState: AppState, status: string, tone: StatusTone, detail: string) {
   currentAppState = nextState;
   const isCompact = nextState === 'tracking' || nextState === 'hold';
+  const shouldPreserveSelectedStatus =
+    infoCardOpen && activeSectionTitle !== '' && (nextState === 'tracking' || nextState === 'hold');
   setUiCompact(isCompact);
   introTitle.textContent = isCompact ? 'WonXR' : '교리도 그림을 비춰주세요';
   scanGuide.classList.toggle('hidden', nextState === 'tracking' || nextState === 'hold');
   scanGuide.classList.toggle('fading', false);
   uiOverlay.dataset.state = nextState;
   updatePlacementButton();
-  setStatus(status, tone, detail);
+  setStatus(shouldPreserveSelectedStatus ? `선택됨: ${activeSectionTitle}` : status, tone, detail);
 }
 
 function getBrowserGuess() {
@@ -2165,6 +2168,7 @@ async function startAR() {
     let overlayOpacity = 0;
     let lastSeenAt = 0;
     let hasWarnedLowAngle = false;
+    let suppressTrackingUntil = 0;
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
@@ -2203,12 +2207,15 @@ async function startAR() {
     applyOverlayCalibration();
 
     rescanCurrentAR = (reason = 'user rescan') => {
+      const now = performance.now();
       rescanCount += 1;
       lastRescanReason = reason;
       isStableInitialized = false;
       hasLastGoodPose = false;
+      lastGoodScaleScalar = 1;
       recognizedTargetIndex = Number.NaN;
       overlayOpacity = 0;
+      suppressTrackingUntil = now + RESCAN_SUPPRESS_MS;
       clearSelectedSection(false, reason);
       arRoot.visible = false;
       setAppState('scan', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
@@ -2218,14 +2225,10 @@ async function startAR() {
       anchor.onTargetFound = () => {
         const now = performance.now();
         const nextContentMode = getModeForTargetIndex(targetIndex);
-        const didChangeContentMode = activeContentMode !== nextContentMode;
         activeAnchorRoot = anchor.group;
         recognizedTargetIndex = targetIndex;
         activeContentMode = nextContentMode;
         textOverlayOpacity = getTextOverlayOpacity(activeContentMode);
-        if (didChangeContentMode) {
-          clearSelectedSection(false, 'target content mode changed');
-        }
         applyOverlayCalibration();
         isTargetFound = true;
         poseStats.foundCount += 1;
@@ -2271,7 +2274,7 @@ async function startAR() {
       let acceptedPose = false;
       let hasRawPose = false;
 
-      if (isTargetFound) {
+      if (isTargetFound && now >= suppressTrackingUntil) {
         activeAnchorRoot.updateMatrixWorld(true);
         rawMatrix.copy(activeAnchorRoot.matrixWorld);
         rawMatrix.decompose(targetPosition, targetQuaternion, targetScale);
@@ -2359,7 +2362,7 @@ async function startAR() {
         poseStats.found = false;
       }
 
-      if (hasLastGoodPose && !acceptedPose) {
+      if (hasLastGoodPose && !acceptedPose && now >= suppressTrackingUntil) {
         const elapsedSinceGoodPose = now - lastSeenAt;
 
         if (elapsedSinceGoodPose <= lostHoldMs) {
@@ -2374,12 +2377,16 @@ async function startAR() {
           arRoot.visible = false;
           isStableInitialized = false;
           hasLastGoodPose = false;
-          clearSelectedSection(false, 'target lost timeout');
 
           if (currentAppState !== 'lost') {
             setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
           }
         }
+      } else if (now < suppressTrackingUntil) {
+        overlayOpacity = 0;
+        arRoot.visible = false;
+        poseStats.found = false;
+        poseStats.holdRemainingMs = Math.max(suppressTrackingUntil - now, 0);
       }
 
       overlayMaterial.opacity = overlayOpacity * textOverlayOpacity;
