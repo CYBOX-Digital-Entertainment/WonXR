@@ -9,6 +9,8 @@ const TARGET_IMAGE_PATH = 'targets/gyorido_empty.png';
 const TARGET_IMAGE_V2_PATH = 'targets/gyorido_empty_v2.png';
 const TARGET_ORIGINAL_MIND_PATH = 'targets/gyorido_original.mind';
 const TARGET_ORIGINAL_IMAGE_PATH = 'targets/gyorido_original.png';
+const TARGET_HANJA_MIND_PATH = 'targets/gyorido_hanja.mind';
+const TARGET_HANJA_IMAGE_PATH = 'targets/gyorido_hanja.png';
 const TARGET_MULTI_MIND_PATH = 'targets/gyorido_multi.mind';
 const OVERLAY_IMAGE_PATH = 'overlays/gyorido_text_overlay.png';
 const HOTSPOT_DATA_PATH = 'data/doctrine_sections.json';
@@ -35,6 +37,7 @@ const SELECTION_ANIMATION_MS = 260;
 const MAIN_SECTION_FILL_OPACITY = 0.16;
 const MAIN_SECTION_OUTLINE_OPACITY = 0.74;
 const ORIGINAL_TEXT_OVERLAY_OPACITY = 0.15;
+const HANJA_TEXT_OVERLAY_OPACITY = 0;
 
 const POSITION_SMOOTHING = 0.12;
 const ROTATION_SMOOTHING = 0.12;
@@ -62,7 +65,9 @@ const isDebugMode = isFullDebugMode || queryParams.get('debug') === '1';
 const isHotspotMode = isFullDebugMode || queryParams.get('hotspots') === '1';
 const targetParam = queryParams.get('target');
 const requestedTargetMode =
-  targetParam === 'v1' || targetParam === 'original' || targetParam === 'multi' ? targetParam : 'v2';
+  targetParam === 'v1' || targetParam === 'original' || targetParam === 'hanja' || targetParam === 'multi'
+    ? targetParam
+    : 'v2';
 function getTargetGuideImagePath(mode: string) {
   if (mode === 'v1') {
     return TARGET_IMAGE_PATH;
@@ -70,6 +75,10 @@ function getTargetGuideImagePath(mode: string) {
 
   if (mode === 'original') {
     return TARGET_ORIGINAL_IMAGE_PATH;
+  }
+
+  if (mode === 'hanja') {
+    return TARGET_HANJA_IMAGE_PATH;
   }
 
   return TARGET_IMAGE_V2_PATH;
@@ -91,7 +100,7 @@ type OverlayCalibration = {
 type CalibrationField = keyof OverlayCalibration;
 
 type TrackingProfile = 'smooth' | 'responsive';
-type TargetMode = 'v2' | 'v1' | 'original' | 'multi';
+type TargetMode = 'v2' | 'v1' | 'original' | 'hanja' | 'multi';
 
 type AppState = 'scan' | 'tracking' | 'hold' | 'lost';
 
@@ -513,7 +522,12 @@ let activeTargetMode: TargetMode = requestedTargetMode;
 let activeTargetFallbackUsed = false;
 let activeTargetMindPath = getRequestedTargetMindPath();
 let activeScanGuideImagePath = scanGuideImagePath;
-let textOverlayOpacity = requestedTargetMode === 'original' ? ORIGINAL_TEXT_OVERLAY_OPACITY : 1;
+let textOverlayOpacity =
+  requestedTargetMode === 'hanja'
+    ? HANJA_TEXT_OVERLAY_OPACITY
+    : requestedTargetMode === 'original'
+      ? ORIGINAL_TEXT_OVERLAY_OPACITY
+      : 1;
 let recognizedTargetIndex = Number.NaN;
 let currentAppState: AppState = 'scan';
 let mindarStartSucceeded = false;
@@ -570,6 +584,8 @@ const debugAssetPaths = [
   TARGET_IMAGE_PATH,
   TARGET_ORIGINAL_MIND_PATH,
   TARGET_ORIGINAL_IMAGE_PATH,
+  TARGET_HANJA_MIND_PATH,
+  TARGET_HANJA_IMAGE_PATH,
   TARGET_MULTI_MIND_PATH,
   OVERLAY_IMAGE_PATH,
   HOTSPOT_DATA_PATH,
@@ -1007,6 +1023,10 @@ function getRequestedTargetMindPath() {
     return TARGET_ORIGINAL_MIND_PATH;
   }
 
+  if (requestedTargetMode === 'hanja') {
+    return TARGET_HANJA_MIND_PATH;
+  }
+
   if (requestedTargetMode === 'multi') {
     return TARGET_MULTI_MIND_PATH;
   }
@@ -1165,6 +1185,8 @@ function updateDebugPanel(stats: PoseStats) {
     `loaded target file: ${activeTargetMindPath}`,
     `fallback used: ${stats.fallbackUsed ? 'yes' : 'no'}`,
     `recognized target index: ${Number.isFinite(recognizedTargetIndex) ? recognizedTargetIndex : '-'}`,
+    `hanja image loaded: ${assetLoadStatus[TARGET_HANJA_IMAGE_PATH] ?? '-'}`,
+    `hanja mind loaded: ${assetLoadStatus[TARGET_HANJA_MIND_PATH] ?? '-'}`,
     `profile: ${stats.profile}`,
     `active section: ${stats.activeSectionId || '-'} ${stats.activeSectionTitle || ''}`,
     `last touched: ${stats.lastTouchedSectionId || '-'} ${stats.lastTouchedSectionTitle || ''}`,
@@ -1914,7 +1936,12 @@ async function startAR() {
     activeTargetMindPath = targetMind.path;
     activeScanGuideImagePath = getTargetGuideImagePath(activeTargetMode);
     scanGuideImage.src = assetUrl(activeScanGuideImagePath);
-    textOverlayOpacity = activeTargetMode === 'original' ? ORIGINAL_TEXT_OVERLAY_OPACITY : 1;
+    textOverlayOpacity =
+      activeTargetMode === 'hanja'
+        ? HANJA_TEXT_OVERLAY_OPACITY
+        : activeTargetMode === 'original'
+          ? ORIGINAL_TEXT_OVERLAY_OPACITY
+          : 1;
     loadedSectionCount = doctrineSections.length;
     selectionTextureSource = overlayTexture;
 
