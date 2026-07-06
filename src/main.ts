@@ -2,8 +2,40 @@ import './styles.css';
 import * as THREE from 'three';
 import { MindARThree } from 'mind-ar/dist/mindar-image-three.prod.js';
 
-const TARGET_ASPECT_RATIO = 1415 / 1000;
+const TARGET_WIDTH = 1;
+const TARGET_HEIGHT = 1415 / 1000;
+const OVERLAY_SCALE_X = 1.0;
+const OVERLAY_SCALE_Y = 1.0;
+const OVERLAY_OFFSET_X = 0.0;
+const OVERLAY_OFFSET_Y = 0.0;
+const OVERLAY_ROTATION_Z = 0.0;
+const TRACKING_FILTER_MIN_CF = 0.05;
+const TRACKING_FILTER_BETA = 1000;
+const TRACKING_WARMUP_TOLERANCE = 3;
+const TRACKING_MISS_TOLERANCE = 5;
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+const queryParams = new URLSearchParams(window.location.search);
+
+function readNumberParam(name: string, fallback: number) {
+  const value = queryParams.get(name);
+
+  if (value === null) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+const overlayCalibration = {
+  scaleX: readNumberParam('sx', OVERLAY_SCALE_X),
+  scaleY: readNumberParam('sy', OVERLAY_SCALE_Y),
+  offsetX: readNumberParam('ox', OVERLAY_OFFSET_X),
+  offsetY: readNumberParam('oy', OVERLAY_OFFSET_Y),
+  rotationZ: readNumberParam('rz', OVERLAY_ROTATION_Z),
+};
+
+console.log('WonXR overlay calibration', overlayCalibration);
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -41,6 +73,7 @@ function requireElement<TElement extends Element>(selector: string) {
 }
 
 const arContainer = requireElement<HTMLDivElement>('#ar-container');
+const uiOverlay = requireElement<HTMLElement>('.ui-overlay');
 const startButton = requireElement<HTMLButtonElement>('#start-button');
 const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
@@ -58,6 +91,10 @@ function setStatus(text: string, tone: StatusTone, detail?: string) {
   if (detail) {
     message.textContent = detail;
   }
+}
+
+function setUiCompact(isCompact: boolean) {
+  uiOverlay.classList.toggle('compact', isCompact);
 }
 
 function canUseCamera() {
@@ -118,6 +155,7 @@ async function startAR() {
   }
 
   hasStarted = true;
+  setUiCompact(false);
   startButton.disabled = true;
   startButton.textContent = '카메라 준비 중';
   setStatus('다시 교리도를 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
@@ -131,6 +169,13 @@ async function startAR() {
       uiLoading: 'no',
       uiScanning: 'no',
       uiError: 'no',
+      // filterMinCF: lower values can reduce jitter but may slow the response.
+      filterMinCF: TRACKING_FILTER_MIN_CF,
+      // filterBeta: affects motion lag compensation.
+      filterBeta: TRACKING_FILTER_BETA,
+      // warmupTolerance/missTolerance stabilize found/lost state transitions.
+      warmupTolerance: TRACKING_WARMUP_TOLERANCE,
+      missTolerance: TRACKING_MISS_TOLERANCE,
     });
 
     const { renderer, scene, camera } = mindarThree;
@@ -139,7 +184,7 @@ async function startAR() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
 
-    const overlayGeometry = new THREE.PlaneGeometry(1, TARGET_ASPECT_RATIO);
+    const overlayGeometry = new THREE.PlaneGeometry(TARGET_WIDTH, TARGET_HEIGHT);
     const overlayMaterial = new THREE.MeshBasicMaterial({
       map: overlayTexture,
       transparent: true,
@@ -150,11 +195,15 @@ async function startAR() {
 
     const overlay = new THREE.Mesh(overlayGeometry, overlayMaterial);
     overlay.visible = false;
+    overlay.scale.set(overlayCalibration.scaleX, overlayCalibration.scaleY, 1);
+    overlay.position.set(overlayCalibration.offsetX, overlayCalibration.offsetY, 0.001);
+    overlay.rotation.z = overlayCalibration.rotationZ;
     overlay.renderOrder = 10;
     anchor.group.add(overlay);
 
     anchor.onTargetFound = () => {
       overlay.visible = true;
+      setUiCompact(true);
       setStatus('인식됨', 'found', '교리도 오버레이를 표시하고 있습니다.');
     };
 
@@ -181,6 +230,7 @@ async function startAR() {
 
     mindarThree = undefined;
     hasStarted = false;
+    setUiCompact(false);
     startButton.disabled = false;
     startButton.textContent = '다시 시도';
 

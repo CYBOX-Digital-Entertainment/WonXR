@@ -12,6 +12,8 @@ declare module 'mind-ar/dist/mindar-image-three.prod.js' {
     maxTrack?: number;
     filterMinCF?: number;
     filterBeta?: number;
+    warmupTolerance?: number;
+    missTolerance?: number;
   };
 
   type MindARAnchor = {

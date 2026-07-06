@@ -91,6 +91,10 @@ button {
   z-index: 5;
   pointer-events: none;
   text-shadow: 0 2px 14px rgba(0, 0, 0, 0.65);
+  transition:
+    top 180ms ease,
+    opacity 180ms ease,
+    transform 180ms ease;
 }
 
 .eyebrow {
@@ -116,6 +120,30 @@ h1 {
   color: rgba(248, 250, 252, 0.82);
   font-size: 1rem;
   line-height: 1.5;
+}
+
+.ui-overlay.compact .intro-panel {
+  top: calc(env(safe-area-inset-top) + 12px);
+  transform: translateY(-2px);
+}
+
+.ui-overlay.compact .eyebrow {
+  margin-bottom: 4px;
+  font-size: 0.7rem;
+}
+
+.ui-overlay.compact h1 {
+  max-width: none;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.ui-overlay.compact .message {
+  max-width: 18rem;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  opacity: 0.82;
 }
 
 .start-button {

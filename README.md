@@ -24,6 +24,21 @@ npm run build
 프로덕션 빌드의 Vite base는 GitHub Pages 저장소 이름을 고려해 `/WonXR/`로 설정되어 있습니다.
 로컬 개발 서버에서는 `/` 경로로 동작합니다.
 
+## 오버레이 위치 보정
+
+오버레이 위치와 크기는 URL query parameter로 임시 보정할 수 있습니다.
+값을 생략하면 코드의 기본 보정값을 사용합니다.
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?ox=0.01&oy=-0.02&sx=1.02&sy=0.98&rz=0.01
+```
+
+- `ox`: 오버레이 X 위치 보정
+- `oy`: 오버레이 Y 위치 보정
+- `sx`: 오버레이 X 배율
+- `sy`: 오버레이 Y 배율
+- `rz`: 오버레이 Z축 회전 보정, 라디안 단위
+
 ## GitHub Pages 배포
 
 이 프로젝트는 `.github/workflows/deploy.yml` workflow로 `dist/` 빌드 결과를 `gh-pages` 브랜치 루트에 배포합니다.
