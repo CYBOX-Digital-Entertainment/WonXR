@@ -29,6 +29,23 @@ npm run build
 오버레이 위치와 크기는 URL query parameter로 임시 보정할 수 있습니다.
 값을 생략하면 코드의 기본 보정값을 사용합니다.
 
+기본 테스트 주소:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/
+```
+
+모바일 보정 모드:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?cal=1
+```
+
+보정 모드에서는 화면 하단의 작은 패널로 `ox`, `oy`, `sx`, `sy`, `rz` 값을 즉시 조정할 수 있습니다.
+조정값은 브라우저 `localStorage`에 저장되며, `Copy URL` 버튼으로 현재 보정값이 포함된 URL을 복사할 수 있습니다.
+
+수동 보정 예시:
+
 ```text
 https://cybox-digital-entertainment.github.io/WonXR/?ox=0.01&oy=-0.02&sx=1.02&sy=0.98&rz=0.01
 ```
@@ -38,6 +55,21 @@ https://cybox-digital-entertainment.github.io/WonXR/?ox=0.01&oy=-0.02&sx=1.02&sy
 - `sx`: 오버레이 X 배율
 - `sy`: 오버레이 Y 배율
 - `rz`: 오버레이 Z축 회전 보정, 라디안 단위
+
+스무딩 조정 예시:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?ps=0.12&rs=0.12&ss=0.12&hold=600
+```
+
+- `ps`: 위치 보간 계수
+- `rs`: 회전 보간 계수
+- `ss`: 스케일 보간 계수
+- `hold`: 타깃을 잠깐 놓쳤을 때 오버레이를 유지하는 시간, 밀리초 단위
+- `mincf`: MindAR filterMinCF
+- `beta`: MindAR filterBeta
+- `warmup`: MindAR warmupTolerance
+- `miss`: MindAR missTolerance
 
 ## GitHub Pages 배포
 
@@ -75,4 +107,6 @@ vite.config.ts
 - `gyorido_empty.png`와 `gyorido_text_overlay.png`는 `1000x1415` 동일 비율입니다.
 - 오버레이 평면은 MindAR 타깃 폭 `1`, 높이 `1.415`로 표시합니다.
 - 투명 PNG를 그대로 사용하며 리사이즈나 크롭은 하지 않습니다.
+- 현재 기본 타깃 파일은 `public/targets/gyorido_empty.mind`입니다. 코드에서는 `TARGET_MIND_PATH` 상수로 분리되어 있어 이후 `gyorido_empty_v2.mind`로 쉽게 바꿀 수 있습니다.
+- 현재 `gyorido_empty.png`는 빈 공간이 많아 추적 jitter가 있을 수 있습니다. 필요하면 비대칭 마커가 추가된 `gyorido_empty_v2.png`를 새로 프린트하고 MindAR 컴파일러로 `gyorido_empty_v2.mind`를 생성해 교체합니다.
 - `mind-ar` 패키지는 브라우저 실행에 필요 없는 `canvas` 네이티브 빌드 의존성을 포함합니다. Windows/Node 22 환경에서 설치 실패가 날 수 있어 프로젝트 `.npmrc`에서 설치 스크립트를 건너뛰도록 설정했습니다.
