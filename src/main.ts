@@ -12,9 +12,9 @@ if (!app) {
 }
 
 app.innerHTML = `
-  <main class="ar-shell">
-    <div id="ar-container" class="ar-container" aria-hidden="true"></div>
+  <div id="ar-container" class="ar-container" aria-hidden="true"></div>
 
+  <main class="ui-overlay">
     <section class="intro-panel" aria-live="polite">
       <p class="eyebrow">WonXR</p>
       <h1>교리도 그림을 비춰주세요</h1>
@@ -66,6 +66,30 @@ function canUseCamera() {
 
 function isAllowedCameraContext() {
   return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+}
+
+function assertArLayersCreated() {
+  const videos = Array.from(arContainer.querySelectorAll('video'));
+  const canvases = Array.from(arContainer.querySelectorAll('canvas'));
+  const children = Array.from(arContainer.children).map((element) => ({
+    tag: element.tagName.toLowerCase(),
+    className: element.className,
+    childCount: element.childElementCount,
+  }));
+
+  console.log('WonXR AR layer check', {
+    videoCount: videos.length,
+    canvasCount: canvases.length,
+    children,
+  });
+
+  if (videos.length === 0) {
+    throw new Error('카메라 영상 요소가 생성되지 않았습니다.');
+  }
+
+  if (canvases.length === 0) {
+    throw new Error('AR 렌더링 canvas가 생성되지 않았습니다.');
+  }
 }
 
 async function loadOverlayTexture() {
@@ -140,20 +164,34 @@ async function startAR() {
     };
 
     await mindarThree.start();
+    assertArLayersCreated();
 
     startButton.classList.add('hidden');
-    setStatus('다시 교리도를 비춰주세요', 'waiting', '교리도 그림이 화면 안에 들어오도록 맞춰주세요.');
+    setStatus('다시 교리도를 비춰주세요', 'waiting', '카메라 화면 안에 교리도 그림이 들어오도록 맞춰주세요.');
 
     renderer.setAnimationLoop(() => {
       renderer.render(scene, camera);
     });
   } catch (error) {
+    try {
+      mindarThree?.stop();
+    } catch (stopError) {
+      console.error('Failed to stop MindAR after start error.', stopError);
+    }
+
+    mindarThree = undefined;
     hasStarted = false;
     startButton.disabled = false;
     startButton.textContent = '다시 시도';
 
     const detail = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
-    setStatus('카메라 권한 실패', 'error', detail);
+    const title = detail.includes('영상 요소')
+      ? '카메라 영상 생성 실패'
+      : detail.toLowerCase().includes('camera') || detail.toLowerCase().includes('permission')
+        ? '카메라 시작 실패'
+        : 'AR 시작 실패';
+
+    setStatus(title, 'error', detail);
     console.error(error);
   }
 }
