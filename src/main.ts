@@ -68,23 +68,12 @@ const requestedTargetMode =
   targetParam === 'v1' || targetParam === 'original' || targetParam === 'hanja' || targetParam === 'multi'
     ? targetParam
     : 'v2';
-function getTargetGuideImagePath(mode: string) {
-  if (mode === 'v1') {
-    return TARGET_IMAGE_PATH;
-  }
-
-  if (mode === 'original') {
-    return TARGET_ORIGINAL_IMAGE_PATH;
-  }
-
-  if (mode === 'hanja') {
-    return TARGET_HANJA_IMAGE_PATH;
-  }
-
-  return TARGET_IMAGE_V2_PATH;
+function getScanGuideImagePath() {
+  // The pre-scan guide is intentionally the clean empty diagram, not the patterned tracking target.
+  return TARGET_IMAGE_PATH;
 }
 
-const scanGuideImagePath = getTargetGuideImagePath(requestedTargetMode);
+const scanGuideImagePath = getScanGuideImagePath();
 const requestedProfile = queryParams.get('profile');
 const trackingProfile = requestedProfile === 'responsive' ? requestedProfile : 'smooth';
 const mainSectionOverlay = queryParams.get('sections') !== '0';
@@ -1230,7 +1219,7 @@ function updateDebugPanel(stats: PoseStats) {
     `guide fallback used: ${scanGuideFallbackUsed ? 'yes' : 'no'}`,
     `guide visible: ${scanGuide.classList.contains('hidden') ? 'no' : 'yes'}`,
     `guide opacity: ${getComputedStyle(scanGuide).opacity}`,
-    `uses real target image: yes`,
+    `uses empty gyorido guide: yes`,
     `uses fake geometry: no`,
     '',
     '[interaction]',
@@ -1934,7 +1923,7 @@ async function startAR() {
     });
     activeTargetMode = targetMind.mode;
     activeTargetMindPath = targetMind.path;
-    activeScanGuideImagePath = getTargetGuideImagePath(activeTargetMode);
+    activeScanGuideImagePath = getScanGuideImagePath();
     scanGuideImage.src = assetUrl(activeScanGuideImagePath);
     textOverlayOpacity =
       activeTargetMode === 'hanja'
