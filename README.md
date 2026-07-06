@@ -24,7 +24,7 @@ https://cybox-digital-entertainment.github.io/WonXR/?mode=debug
 1. v2 패턴이 들어간 교리도 출력물을 책상이나 클립보드 위에 평평하게 둡니다.
 2. Main demo를 iPhone Safari 또는 Android Chrome/Samsung Internet에서 엽니다.
 3. 카메라 권한을 허용합니다.
-4. 중앙의 흑백 pulsing guide에 교리도 전체를 맞춥니다.
+4. 중앙의 실제 교리도 타깃 이미지 기반 흑백 pulsing guide에 교리도 전체를 맞춥니다.
 5. 인식 후 `스캔 종료` 버튼이 나타나면 위치가 맞는지 확인하고 누릅니다.
 6. 배치가 완료되면 원하는 구역을 터치합니다.
 7. 선택 구역의 raised 3D block과 하단 설명 카드가 나타나는지 확인합니다.
@@ -51,6 +51,14 @@ Android:
 
 Android adaptive/themed icon 지원은 런처와 브라우저 WebAPK 지원에 따라 달라집니다.
 iOS 아이콘 색상/틴트 효과는 iOS 설정에 의해 달라질 수 있으며, 앱은 Home Screen용 아이콘을 제공합니다.
+
+## Visual Style / Font
+
+UI는 iPhone 사용을 우선 고려한 Liquid Glass-inspired 스타일을 사용합니다.
+카메라 화면 위에서 읽히도록 glass panel에는 blur, saturate, border highlight, strong fallback background를 함께 적용합니다.
+
+한둥근돋움 / WON Dotum이 시스템에 설치되어 있으면 우선 사용됩니다.
+웹 배포용 폰트 임베딩은 별도 라이선스 확인 후 진행하며, 현재 저장소에는 폰트 파일을 포함하지 않습니다.
 
 ## Local Development
 

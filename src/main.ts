@@ -5,6 +5,8 @@ import { formatFeatureSupport, getCompatibilityReport } from './compatibility';
 
 const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
 const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
+const TARGET_IMAGE_PATH = 'targets/gyorido_empty.png';
+const TARGET_IMAGE_V2_PATH = 'targets/gyorido_empty_v2.png';
 const OVERLAY_IMAGE_PATH = 'overlays/gyorido_text_overlay.png';
 const HOTSPOT_DATA_PATH = 'data/doctrine_sections.json';
 const TARGET_WIDTH = 1;
@@ -26,10 +28,10 @@ const OUTLINE_OPACITY = 1.0;
 const SELECTION_ANIMATION_MS = 260;
 const FOUND_TO_PREVIEW_MS = 200;
 const MIN_FOUND_FRAMES_FOR_PLACE_BUTTON = 3;
-const SOFT_CORRECTION_ALPHA = 0.015;
-const SOFT_CORRECTION_MAX_POSITION_DELTA = 0.035;
-const SOFT_CORRECTION_MAX_ROTATION_DELTA = 0.12;
-const SOFT_CORRECTION_MAX_SCALE_DELTA = 0.08;
+const SOFT_CORRECTION_ALPHA = 0.008;
+const SOFT_CORRECTION_MAX_POSITION_DELTA = 0.025;
+const SOFT_CORRECTION_MAX_ROTATION_DELTA = 0.08;
+const SOFT_CORRECTION_MAX_SCALE_DELTA = 0.05;
 const DRIFT_WARNING_FRAMES = 15;
 
 const POSITION_SMOOTHING = 0.1;
@@ -60,6 +62,7 @@ const isCalibrationMode = queryParams.get('cal') === '1';
 const isDebugMode = isFullDebugMode || queryParams.get('debug') === '1';
 const isHotspotMode = isFullDebugMode || queryParams.get('hotspots') === '1';
 const requestedTargetVersion = queryParams.get('target') === 'v1' ? 'v1' : 'v2';
+const scanGuideImagePath = requestedTargetVersion === 'v1' ? TARGET_IMAGE_PATH : TARGET_IMAGE_V2_PATH;
 const requestedProfile = queryParams.get('profile');
 const trackingProfile = requestedProfile === 'responsive' || requestedProfile === 'locked' ? requestedProfile : 'smooth';
 
@@ -275,6 +278,8 @@ console.log('WonXR AR config', {
   targetVersion: requestedTargetVersion,
   targetMindPath: getRequestedTargetMindPath(),
   targetMindUrl: assetUrl(getRequestedTargetMindPath()),
+  scanGuidePath: scanGuideImagePath,
+  scanGuideUrl: assetUrl(scanGuideImagePath),
   overlayPath: OVERLAY_IMAGE_PATH,
   overlayUrl: assetUrl(OVERLAY_IMAGE_PATH),
   calibration: {
@@ -321,23 +326,14 @@ app.innerHTML = `
     </section>
 
     <section id="scan-guide" class="scan-guide" aria-hidden="true">
-      <svg viewBox="0 0 100 141.5" role="img">
-        <rect x="4" y="4" width="92" height="133.5" rx="2" />
-        <line x1="50" y1="10" x2="50" y2="131" />
-        <line x1="14" y1="38" x2="86" y2="38" />
-        <line x1="14" y1="72" x2="86" y2="72" />
-        <line x1="14" y1="106" x2="86" y2="106" />
-        <circle cx="50" cy="25" r="7" />
-        <rect x="18" y="46" width="24" height="14" />
-        <rect x="58" y="46" width="24" height="14" />
-        <rect x="18" y="82" width="24" height="14" />
-        <rect x="58" y="82" width="24" height="14" />
-      </svg>
+      <img id="scan-guide-image" src="${assetUrl(scanGuideImagePath)}" alt="" />
       <p>교리도를 이 위치에 맞춰 비춰주세요</p>
     </section>
 
     <button id="start-button" class="start-button" type="button">카메라 시작</button>
-    <button id="placement-button" class="placement-button hidden" type="button">스캔 종료</button>
+    <div id="ar-bottom-controls" class="ar-bottom-controls">
+      <button id="placement-button" class="placement-button hidden" type="button">스캔 종료</button>
+    </div>
     <button id="info-button" class="info-button" type="button">정보</button>
 
     <section id="compatibility-panel" class="compatibility-panel hidden" role="alert">
@@ -414,13 +410,15 @@ app.innerHTML = `
       <dl>
         <dt>Developer</dt>
         <dd>CYBOX Digital Entertainment</dd>
-        <dt>Developer / Planner</dt>
+        <dt>Planner / Developer</dt>
         <dd>Song MinSoo</dd>
         <dt>Project status</dt>
         <dd>Prototype for Won-Buddhism content contest</dd>
       </dl>
       <p>교리 설명 본문은 현재 작성 예정이며, 원불교 교무님 검수 후 반영 예정입니다.</p>
       <p>이 앱은 교리도 인식을 위해 카메라를 사용합니다. 카메라 영상은 서버로 업로드하지 않으며, 브라우저 내 이미지 인식과 AR 표시 용도로만 사용됩니다.</p>
+      <h3>Font notice</h3>
+      <p>한둥근돋움 / WON Dotum이 설치된 환경에서는 해당 서체를 우선 사용합니다. 웹 배포용 폰트 임베딩은 라이선스 확인 후 적용 예정입니다.</p>
       <h3>홈 화면에 추가</h3>
       <p>iPhone: Safari로 접속한 뒤 공유 버튼을 누르고 홈 화면에 추가를 선택하세요. 홈 화면 앱 모드에서 카메라가 열리지 않으면 Safari에서 직접 열어주세요.</p>
       <p>Android: Chrome 또는 Samsung Internet에서 앱 설치 또는 홈 화면에 추가를 선택하세요. Android adaptive/themed icon 지원은 런처와 브라우저 WebAPK 지원에 따라 달라집니다.</p>
@@ -457,7 +455,9 @@ const arContainer = requireElement<HTMLDivElement>('#ar-container');
 const uiOverlay = requireElement<HTMLElement>('.ui-overlay');
 const introTitle = requireElement<HTMLHeadingElement>('#intro-title');
 const scanGuide = requireElement<HTMLElement>('#scan-guide');
+const scanGuideImage = requireElement<HTMLImageElement>('#scan-guide-image');
 const startButton = requireElement<HTMLButtonElement>('#start-button');
+const bottomControls = requireElement<HTMLDivElement>('#ar-bottom-controls');
 const placementButton = requireElement<HTMLButtonElement>('#placement-button');
 const infoButton = requireElement<HTMLButtonElement>('#info-button');
 const statusText = requireElement<HTMLSpanElement>('#status-text');
@@ -489,6 +489,16 @@ const aboutPanel = requireElement<HTMLElement>('#about-panel');
 const aboutClose = requireElement<HTMLButtonElement>('#about-close');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
+let scanGuideFallbackUsed = false;
+
+scanGuideImage.addEventListener('error', () => {
+  if (scanGuideFallbackUsed || scanGuideImagePath === TARGET_IMAGE_PATH) {
+    return;
+  }
+
+  scanGuideFallbackUsed = true;
+  scanGuideImage.src = assetUrl(TARGET_IMAGE_PATH);
+});
 
 let mindarThree: MindARThree | undefined;
 let hasStarted = false;
@@ -564,9 +574,9 @@ const interactionDebug = {
 
 const debugAssetPaths = [
   TARGET_MIND_V2_PATH,
-  'targets/gyorido_empty_v2.png',
+  TARGET_IMAGE_V2_PATH,
   TARGET_MIND_PATH,
-  'targets/gyorido_empty.png',
+  TARGET_IMAGE_PATH,
   OVERLAY_IMAGE_PATH,
   HOTSPOT_DATA_PATH,
   'manifest.webmanifest',
@@ -1134,10 +1144,28 @@ function formatAssetStatuses() {
   return debugAssetPaths.map((path) => `${path}: ${assetLoadStatus[path] ?? '-'}`).join('\n');
 }
 
+function formatDomRect(element: Element) {
+  const rect = element.getBoundingClientRect();
+  return `x ${Math.round(rect.left)}, y ${Math.round(rect.top)}, w ${Math.round(rect.width)}, h ${Math.round(rect.height)}`;
+}
+
+function isBottomControlsUnexpectedlyHigh() {
+  const rect = bottomControls.getBoundingClientRect();
+  return rect.top < window.innerHeight * 0.55;
+}
+
+function formatMatrix(matrix: THREE.Matrix4) {
+  return matrix.elements.map((value) => value.toFixed(3)).join(', ');
+}
+
 function updateDebugPanel(stats: PoseStats) {
   if (!isDebugMode) {
     return;
   }
+
+  previewRootRef?.updateMatrixWorld(true);
+  placedRootRef?.updateMatrixWorld(true);
+  const bottomControlsUnexpected = isBottomControlsUnexpectedlyHigh();
 
   debugContent.textContent = [
     '[general]',
@@ -1158,6 +1186,8 @@ function updateDebugPanel(stats: PoseStats) {
     '',
     '[placement]',
     `has placed pose: ${hasPlacedPose ? 'yes' : 'no'}`,
+    `placed root visible: ${placedRootRef?.visible ? 'yes' : 'no'}`,
+    `preview root visible: ${previewRootRef?.visible ? 'yes' : 'no'}`,
     `placed pos: ${formatDebugNumber(placedPosePosition.x)}, ${formatDebugNumber(placedPosePosition.y)}, ${formatDebugNumber(placedPosePosition.z)}`,
     `placed rot z: ${formatDebugNumber(getQuaternionZDegrees(placedPoseQuaternion))}deg`,
     `placed scale: ${formatDebugNumber(getScaleScalar(placedPoseScale))}`,
@@ -1174,6 +1204,27 @@ function updateDebugPanel(stats: PoseStats) {
     `last rescan reason: ${lastRescanReason || '-'}`,
     `last placement time: ${lastPlacementTime ? Math.round(performance.now() - lastPlacementTime) + 'ms ago' : '-'}`,
     `needs rescan: ${needsRescan ? 'yes' : 'no'}`,
+    `target plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
+    `overlay plane: ${TARGET_WIDTH} x ${TARGET_HEIGHT}`,
+    `calibration ox/oy/sx/sy/rz: ${overlayCalibration.offsetX}/${overlayCalibration.offsetY}/${overlayCalibration.scaleX}/${overlayCalibration.scaleY}/${overlayCalibration.rotationZ}`,
+    `placed matrix: ${placedRootRef ? formatMatrix(placedRootRef.matrixWorld) : '-'}`,
+    `preview matrix: ${previewRootRef ? formatMatrix(previewRootRef.matrixWorld) : '-'}`,
+    '',
+    '[button/ui]',
+    `bottom button: ${placementButton.classList.contains('hidden') ? '-' : placementButton.textContent?.trim() || '-'}`,
+    `bottom controls rect: ${formatDomRect(bottomControls)}`,
+    `bottom controls moved unexpectedly: ${bottomControlsUnexpected ? 'yes' : 'no'}`,
+    `info card open: ${infoCardOpen ? 'yes' : 'no'}`,
+    `last close reason: ${lastCloseReason || '-'}`,
+    '',
+    '[scan guide]',
+    `guide source image: ${scanGuideImagePath}`,
+    `guide img src: ${scanGuideImage.currentSrc || scanGuideImage.src || '-'}`,
+    `guide fallback used: ${scanGuideFallbackUsed ? 'yes' : 'no'}`,
+    `guide visible: ${scanGuide.classList.contains('hidden') ? 'no' : 'yes'}`,
+    `guide opacity: ${getComputedStyle(scanGuide).opacity}`,
+    `uses real target image: yes`,
+    `uses fake geometry: no`,
     '',
     '[interaction]',
     `pointerdown count: ${interactionDebug.pointerDownCount}`,
@@ -1345,7 +1396,7 @@ function createLabelSprite(text: string, color: THREE.Color) {
   context.lineWidth = 8;
   context.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
   context.fillStyle = '#ffffff';
-  context.font = '700 34px system-ui, -apple-system, Segoe UI, sans-serif';
+  context.font = '700 34px "WON Dotum", "한둥근돋움", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif';
   context.textBaseline = 'middle';
   context.fillText(text, 22, canvas.height / 2, canvas.width - 44);
 
@@ -1376,6 +1427,82 @@ function getSectionColor(section: DoctrineSection) {
   const color = new THREE.Color();
   color.setStyle(section.color ?? '#6ee7b7');
   return color;
+}
+
+function createAlignmentDebugGroup() {
+  const group = new THREE.Group();
+  group.visible = isDebugMode;
+
+  const outlineMaterial = new THREE.LineBasicMaterial({
+    color: 0xf2c400,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const halfWidth = TARGET_WIDTH / 2;
+  const halfHeight = TARGET_HEIGHT / 2;
+  const z = 0.016;
+  const outlineGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-halfWidth, halfHeight, z),
+    new THREE.Vector3(halfWidth, halfHeight, z),
+    new THREE.Vector3(halfWidth, -halfHeight, z),
+    new THREE.Vector3(-halfWidth, -halfHeight, z),
+  ]);
+  const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
+  outline.renderOrder = 60;
+  group.add(outline);
+
+  const crossMaterial = new THREE.LineBasicMaterial({
+    color: 0x004ef2,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const crossLength = 0.08;
+  const horizontal = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-crossLength, 0, z + 0.001),
+      new THREE.Vector3(crossLength, 0, z + 0.001),
+    ]),
+    crossMaterial,
+  );
+  const vertical = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, -crossLength, z + 0.001),
+      new THREE.Vector3(0, crossLength, z + 0.001),
+    ]),
+    crossMaterial,
+  );
+  horizontal.renderOrder = 61;
+  vertical.renderOrder = 61;
+  group.add(horizontal, vertical);
+
+  const cornerMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const cornerSize = 0.025;
+  const cornerPositions = [
+    [-halfWidth, halfHeight],
+    [halfWidth, halfHeight],
+    [halfWidth, -halfHeight],
+    [-halfWidth, -halfHeight],
+  ] as const;
+
+  for (const [x, y] of cornerPositions) {
+    const marker = new THREE.Mesh(new THREE.PlaneGeometry(cornerSize, cornerSize), cornerMaterial);
+    marker.position.set(x, y, z + 0.002);
+    marker.renderOrder = 62;
+    group.add(marker);
+  }
+
+  return group;
 }
 
 function createHotspotDebugGroup(sections: DoctrineSection[]) {
@@ -1786,6 +1913,7 @@ async function startAR() {
     activeRenderer = renderer;
     activeCamera = camera;
     const anchor = mindarThree.addAnchor(0);
+    const anchorRoot = anchor.group;
     const previewRoot = new THREE.Group();
     const placedRoot = new THREE.Group();
     const targetPosition = new THREE.Vector3();
@@ -1883,6 +2011,7 @@ async function startAR() {
     overlayPlane = new THREE.Mesh(overlayGeometry, overlayMaterial);
     overlayPlane.renderOrder = 10;
     overlayContentGroup.add(overlayPlane);
+    overlayContentGroup.add(createAlignmentDebugGroup());
     const { group: hotspotDebugGroup, hitMeshes: hotspotHitMeshes } = createHotspotDebugGroup(doctrineSections);
     hitMeshes.splice(0, hitMeshes.length, ...hotspotHitMeshes);
     poseStats.hitMeshCount = hitMeshes.length;
@@ -1903,9 +2032,16 @@ async function startAR() {
         return;
       }
 
-      placedRoot.position.copy(previewRoot.position);
-      placedRoot.quaternion.copy(previewRoot.quaternion);
-      placedRoot.scale.copy(previewRoot.scale);
+      const placedWorldPosition = new THREE.Vector3();
+      const placedWorldQuaternion = new THREE.Quaternion();
+      const placedWorldScale = new THREE.Vector3();
+
+      previewRoot.updateMatrixWorld(true);
+      previewRoot.matrixWorld.decompose(placedWorldPosition, placedWorldQuaternion, placedWorldScale);
+      placedRoot.position.copy(placedWorldPosition);
+      placedRoot.quaternion.copy(placedWorldQuaternion);
+      placedRoot.scale.copy(placedWorldScale);
+      placedRoot.updateMatrixWorld(true);
       placedRoot.visible = true;
       previewRoot.visible = false;
 
@@ -1918,9 +2054,9 @@ async function startAR() {
       needsRescan = false;
       driftWarningCounter = 0;
       lastPoseDelta = { position: 0, rotation: 0, scale: 0 };
-      placedPosePosition.copy(placedRoot.position);
-      placedPoseQuaternion.copy(placedRoot.quaternion);
-      placedPoseScale.copy(placedRoot.scale);
+      placedPosePosition.copy(placedWorldPosition);
+      placedPoseQuaternion.copy(placedWorldQuaternion);
+      placedPoseScale.copy(placedWorldScale);
       lastPlacementTime = performance.now();
       setAppState('placed', '배치 완료  구역을 터치하세요', 'found', '구역을 터치해 설명을 확인하세요');
     };
@@ -1998,8 +2134,8 @@ async function startAR() {
       let hasRawPose = false;
 
       if (isTargetFound) {
-        anchor.group.updateMatrixWorld(true);
-        rawMatrix.copy(anchor.group.matrixWorld);
+        anchorRoot.updateMatrixWorld(true);
+        rawMatrix.copy(anchorRoot.matrixWorld);
         rawMatrix.decompose(targetPosition, targetQuaternion, targetScale);
         hasRawPose = true;
 
@@ -2201,6 +2337,19 @@ async function startAR() {
         activeTargetFallbackUsed ? 'fallback to v1' : '',
         !videoExists ? 'no video element' : '',
         !canvasExists ? 'no canvas element' : '',
+        hasPlacedPose && placedRoot.parent !== scene ? 'placedRoot following raw anchor unexpectedly' : '',
+        hasPlacedPose && !placedRoot.visible ? 'target lost but placedRoot hidden' : '',
+        isBottomControlsUnexpectedlyHigh() ? 'rescan button not in bottom controls' : '',
+        scanGuideFallbackUsed ? 'scan guide target image fallback used' : '',
+        scanGuideImage.complete && scanGuideImage.naturalWidth === 0 ? 'scan guide source missing' : '',
+        scanGuide.querySelector('svg') ? 'scan guide using fallback/fake geometry' : '',
+        overlayCalibration.offsetX !== 0 ||
+        overlayCalibration.offsetY !== 0 ||
+        overlayCalibration.scaleX !== 1 ||
+        overlayCalibration.scaleY !== 1 ||
+        overlayCalibration.rotationZ !== 0
+          ? 'placement alignment offset non-neutral'
+          : '',
         poseStats.rejectedFrames > 12 ? 'pose outlier too frequent' : '',
         poseStats.lostCount > 4 && !hasPlacedPose ? 'target lost too often' : '',
         hasPlacedPose && !isTargetFound ? 'target lost but placement held' : '',
