@@ -24,8 +24,13 @@ const SIDE_OPACITY = 0.78;
 const HIGHLIGHT_OPACITY = 0.2;
 const OUTLINE_OPACITY = 1.0;
 const SELECTION_ANIMATION_MS = 260;
-const FOUND_TO_EXPLORE_MS = 150;
-const MIN_FOUND_FRAMES_FOR_EXPLORE = 1;
+const FOUND_TO_PREVIEW_MS = 200;
+const MIN_FOUND_FRAMES_FOR_PLACE_BUTTON = 3;
+const SOFT_CORRECTION_ALPHA = 0.015;
+const SOFT_CORRECTION_MAX_POSITION_DELTA = 0.035;
+const SOFT_CORRECTION_MAX_ROTATION_DELTA = 0.12;
+const SOFT_CORRECTION_MAX_SCALE_DELTA = 0.08;
+const DRIFT_WARNING_FRAMES = 15;
 
 const POSITION_SMOOTHING = 0.1;
 const ROTATION_SMOOTHING = 0.1;
@@ -70,7 +75,7 @@ type CalibrationField = keyof OverlayCalibration;
 
 type TrackingProfile = 'smooth' | 'responsive' | 'locked';
 
-type AppState = 'scan' | 'tracking' | 'explore' | 'holding' | 'lost';
+type AppState = 'scan' | 'preview' | 'placed' | 'drift-warning' | 'rescan' | 'lost';
 
 type ProfileSettings = {
   positionSmoothing: number;
@@ -315,7 +320,24 @@ app.innerHTML = `
       <p id="message" class="message">카메라를 시작하면 교리도 인식을 준비합니다.</p>
     </section>
 
+    <section id="scan-guide" class="scan-guide" aria-hidden="true">
+      <svg viewBox="0 0 100 141.5" role="img">
+        <rect x="4" y="4" width="92" height="133.5" rx="2" />
+        <line x1="50" y1="10" x2="50" y2="131" />
+        <line x1="14" y1="38" x2="86" y2="38" />
+        <line x1="14" y1="72" x2="86" y2="72" />
+        <line x1="14" y1="106" x2="86" y2="106" />
+        <circle cx="50" cy="25" r="7" />
+        <rect x="18" y="46" width="24" height="14" />
+        <rect x="58" y="46" width="24" height="14" />
+        <rect x="18" y="82" width="24" height="14" />
+        <rect x="58" y="82" width="24" height="14" />
+      </svg>
+      <p>교리도를 이 위치에 맞춰 비춰주세요</p>
+    </section>
+
     <button id="start-button" class="start-button" type="button">카메라 시작</button>
+    <button id="placement-button" class="placement-button hidden" type="button">스캔 종료</button>
     <button id="info-button" class="info-button" type="button">정보</button>
 
     <section id="compatibility-panel" class="compatibility-panel hidden" role="alert">
@@ -434,7 +456,9 @@ function requireElement<TElement extends Element>(selector: string) {
 const arContainer = requireElement<HTMLDivElement>('#ar-container');
 const uiOverlay = requireElement<HTMLElement>('.ui-overlay');
 const introTitle = requireElement<HTMLHeadingElement>('#intro-title');
+const scanGuide = requireElement<HTMLElement>('#scan-guide');
 const startButton = requireElement<HTMLButtonElement>('#start-button');
+const placementButton = requireElement<HTMLButtonElement>('#placement-button');
 const infoButton = requireElement<HTMLButtonElement>('#info-button');
 const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
@@ -472,6 +496,8 @@ let overlayContentGroup: THREE.Group | undefined;
 let overlayPlane: THREE.Mesh | undefined;
 let selectionGroup: THREE.Group | undefined;
 let selectionTextureSource: THREE.Texture | undefined;
+let previewRootRef: THREE.Group | undefined;
+let placedRootRef: THREE.Group | undefined;
 let activeSectionId = '';
 let activeSectionTitle = '';
 let lastTouchedSectionId = '';
@@ -502,6 +528,25 @@ let serviceWorkerStatus = 'not registered';
 let manifestStatus = 'not checked';
 let sensorPermissionState = 'not requested';
 let deviceOrientationLabel = '-';
+let hasPlacedPose = false;
+let placedPosePosition = new THREE.Vector3();
+let placedPoseQuaternion = new THREE.Quaternion();
+let placedPoseScale = new THREE.Vector3(1, 1, 1);
+let previewPosePosition = new THREE.Vector3();
+let previewPoseQuaternion = new THREE.Quaternion();
+let previewPoseScale = new THREE.Vector3(1, 1, 1);
+let currentTargetPosition = new THREE.Vector3();
+let currentTargetQuaternion = new THREE.Quaternion();
+let currentTargetScale = new THREE.Vector3(1, 1, 1);
+let lastPoseDelta = { position: Number.NaN, rotation: Number.NaN, scale: Number.NaN };
+let softCorrectionAppliedCount = 0;
+let driftWarningCounter = 0;
+let rescanCount = 0;
+let lastRescanReason = '';
+let lastPlacementTime = 0;
+let needsRescan = false;
+let placeCurrentPose: () => void = () => undefined;
+let rescanCurrentAR: (reason?: string) => void = () => undefined;
 
 const interactionDebug = {
   pointerDownCount: 0,
@@ -599,11 +644,34 @@ function setUiCompact(isCompact: boolean) {
   uiOverlay.classList.toggle('compact', isCompact);
 }
 
+function updatePlacementButton() {
+  if (currentAppState === 'preview') {
+    placementButton.textContent = '스캔 종료';
+    placementButton.classList.remove('hidden');
+    return;
+  }
+
+  if (currentAppState === 'placed' || currentAppState === 'drift-warning') {
+    placementButton.textContent = '재스캔';
+    placementButton.classList.remove('hidden');
+    return;
+  }
+
+  placementButton.classList.add('hidden');
+}
+
 function setAppState(nextState: AppState, status: string, tone: StatusTone, detail: string) {
   currentAppState = nextState;
-  const isCompact = nextState === 'tracking' || nextState === 'explore' || nextState === 'holding';
+  const isCompact = nextState === 'preview' || nextState === 'placed' || nextState === 'drift-warning';
   setUiCompact(isCompact);
   introTitle.textContent = isCompact ? 'WonXR' : '교리도 그림을 비춰주세요';
+  scanGuide.classList.toggle(
+    'hidden',
+    nextState !== 'scan' && nextState !== 'rescan' && nextState !== 'lost' && nextState !== 'preview',
+  );
+  scanGuide.classList.toggle('fading', nextState === 'preview');
+  uiOverlay.dataset.state = nextState;
+  updatePlacementButton();
   setStatus(status, tone, detail);
 }
 
@@ -727,7 +795,7 @@ function updateRendererForViewport() {
 
 function showOrientationGuidance() {
   if (window.innerWidth > window.innerHeight) {
-    setStatus('세로 화면에서 더 안정적으로 작동합니다', 'ready', '세로 화면으로 돌아오면 다시 스캔합니다.');
+    setStatus('세로 화면에서 더 안정적으로 작동합니다', 'ready', '화면 회전으로 재스캔이 필요할 수 있습니다.');
   }
 }
 
@@ -755,6 +823,8 @@ async function restartAR(reason: string) {
   mindarThree = undefined;
   activeRenderer = undefined;
   activeCamera = undefined;
+  previewRootRef = undefined;
+  placedRootRef = undefined;
   overlayContentGroup = undefined;
   overlayPlane = undefined;
   selectionGroup = undefined;
@@ -776,10 +846,19 @@ async function restartAR(reason: string) {
 function scheduleOrientationRestart(reason: string) {
   updateRendererForViewport();
   showOrientationGuidance();
+  lastOrientationChangeTime = performance.now();
+
+  if (hasPlacedPose) {
+    needsRescan = true;
+    lastRestartReason = reason;
+    setAppState('drift-warning', '화면 회전으로 재스캔이 필요합니다', 'ready', '배치된 화면은 유지됩니다. 필요하면 재스캔을 누르세요.');
+    return;
+  }
+
   window.clearTimeout(orientationRestartTimer);
   orientationRestartTimer = window.setTimeout(() => {
     void restartAR(reason);
-  }, 450);
+  }, 300);
 }
 
 async function requestDeviceSensorPermission() {
@@ -1076,6 +1155,25 @@ function updateDebugPanel(stats: PoseStats) {
     `last close reason: ${lastCloseReason || '-'}`,
     `last pointer target: ${lastPointerTarget || '-'}`,
     `close blocked by debounce: ${closeBlockedByDebounce ? 'yes' : 'no'}`,
+    '',
+    '[placement]',
+    `has placed pose: ${hasPlacedPose ? 'yes' : 'no'}`,
+    `placed pos: ${formatDebugNumber(placedPosePosition.x)}, ${formatDebugNumber(placedPosePosition.y)}, ${formatDebugNumber(placedPosePosition.z)}`,
+    `placed rot z: ${formatDebugNumber(getQuaternionZDegrees(placedPoseQuaternion))}deg`,
+    `placed scale: ${formatDebugNumber(getScaleScalar(placedPoseScale))}`,
+    `preview pos: ${formatDebugNumber(previewPosePosition.x)}, ${formatDebugNumber(previewPosePosition.y)}, ${formatDebugNumber(previewPosePosition.z)}`,
+    `preview rot z: ${formatDebugNumber(getQuaternionZDegrees(previewPoseQuaternion))}deg`,
+    `preview scale: ${formatDebugNumber(getScaleScalar(previewPoseScale))}`,
+    `target pos: ${formatDebugNumber(currentTargetPosition.x)}, ${formatDebugNumber(currentTargetPosition.y)}, ${formatDebugNumber(currentTargetPosition.z)}`,
+    `target rot z: ${formatDebugNumber(getQuaternionZDegrees(currentTargetQuaternion))}deg`,
+    `target scale: ${formatDebugNumber(getScaleScalar(currentTargetScale))}`,
+    `delta from placed: p ${formatDebugNumber(lastPoseDelta.position)}, r ${formatDebugNumber(lastPoseDelta.rotation)}, s ${formatDebugNumber(lastPoseDelta.scale)}`,
+    `soft corrections: ${softCorrectionAppliedCount}`,
+    `drift counter: ${driftWarningCounter}`,
+    `rescan count: ${rescanCount}`,
+    `last rescan reason: ${lastRescanReason || '-'}`,
+    `last placement time: ${lastPlacementTime ? Math.round(performance.now() - lastPlacementTime) + 'ms ago' : '-'}`,
+    `needs rescan: ${needsRescan ? 'yes' : 'no'}`,
     '',
     '[interaction]',
     `pointerdown count: ${interactionDebug.pointerDownCount}`,
@@ -1592,7 +1690,7 @@ function clearSelectedSection(updateStatus = true, reason = 'close button') {
   selectionGroup = undefined;
 
   if (updateStatus) {
-    const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'lost';
+    const isLostOrScanning = currentAppState === 'scan' || currentAppState === 'rescan' || currentAppState === 'lost';
     const status = isLostOrScanning ? '다시 교리도를 비춰주세요' : '구역을 터치해 설명을 확인하세요';
     setStatus(status, isLostOrScanning ? 'waiting' : 'found', '구역을 터치해 설명을 확인하세요');
   }
@@ -1651,7 +1749,7 @@ async function startAR() {
   lastErrorMessage = '';
   startButton.disabled = true;
   startButton.textContent = '카메라 준비 중';
-  setAppState('scan', '교리도 전체가 화면에 들어오게 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
+  setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'ready', '카메라 권한을 요청합니다.');
 
   try {
     const [overlayTexture, doctrineSections, targetMind] = await Promise.all([
@@ -1688,7 +1786,8 @@ async function startAR() {
     activeRenderer = renderer;
     activeCamera = camera;
     const anchor = mindarThree.addAnchor(0);
-    const stableGroup = new THREE.Group();
+    const previewRoot = new THREE.Group();
+    const placedRoot = new THREE.Group();
     const targetPosition = new THREE.Vector3();
     const targetQuaternion = new THREE.Quaternion();
     const targetScale = new THREE.Vector3();
@@ -1762,10 +1861,14 @@ async function startAR() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
 
-    stableGroup.visible = false;
-    scene.add(stableGroup);
+    previewRoot.visible = false;
+    placedRoot.visible = false;
+    previewRootRef = previewRoot;
+    placedRootRef = placedRoot;
+    scene.add(previewRoot);
+    scene.add(placedRoot);
     overlayContentGroup = new THREE.Group();
-    stableGroup.add(overlayContentGroup);
+    previewRoot.add(overlayContentGroup);
 
     const overlayGeometry = new THREE.PlaneGeometry(TARGET_WIDTH, TARGET_HEIGHT);
     const overlayMaterial = new THREE.MeshBasicMaterial({
@@ -1788,10 +1891,68 @@ async function startAR() {
     hotspotPointerCleanup = setupHotspotPointer(
       camera,
       hitMeshes,
-      () => isTargetFound || stableGroup.visible || currentAppState === 'holding',
+      () =>
+        (currentAppState === 'preview' && previewRoot.visible) ||
+        ((currentAppState === 'placed' || currentAppState === 'drift-warning') && placedRoot.visible),
       selectSection,
     );
     applyOverlayCalibration();
+
+    placeCurrentPose = () => {
+      if (!isStableInitialized || !previewRoot.visible) {
+        return;
+      }
+
+      placedRoot.position.copy(previewRoot.position);
+      placedRoot.quaternion.copy(previewRoot.quaternion);
+      placedRoot.scale.copy(previewRoot.scale);
+      placedRoot.visible = true;
+      previewRoot.visible = false;
+
+      if (overlayContentGroup) {
+        overlayContentGroup.removeFromParent();
+        placedRoot.add(overlayContentGroup);
+      }
+
+      hasPlacedPose = true;
+      needsRescan = false;
+      driftWarningCounter = 0;
+      lastPoseDelta = { position: 0, rotation: 0, scale: 0 };
+      placedPosePosition.copy(placedRoot.position);
+      placedPoseQuaternion.copy(placedRoot.quaternion);
+      placedPoseScale.copy(placedRoot.scale);
+      lastPlacementTime = performance.now();
+      setAppState('placed', '배치 완료  구역을 터치하세요', 'found', '구역을 터치해 설명을 확인하세요');
+    };
+
+    rescanCurrentAR = (reason = 'user rescan') => {
+      rescanCount += 1;
+      lastRescanReason = reason;
+      hasPlacedPose = false;
+      needsRescan = false;
+      driftWarningCounter = 0;
+      isPoseLocked = false;
+      stableFrameCount = 0;
+      foundFrameCount = 0;
+      isStableInitialized = false;
+      hasLastGoodPose = false;
+      overlayOpacity = 0;
+      clearSelectedSection(false, reason);
+
+      if (overlayContentGroup) {
+        overlayContentGroup.removeFromParent();
+        previewRoot.add(overlayContentGroup);
+      }
+
+      previewRoot.visible = false;
+      placedRoot.visible = false;
+      setAppState('rescan', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
+      window.setTimeout(() => {
+        if (currentAppState === 'rescan') {
+          setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
+        }
+      }, 250);
+    };
 
     anchor.onTargetFound = () => {
       const now = performance.now();
@@ -1800,16 +1961,19 @@ async function startAR() {
       foundFrameCount = 0;
       foundAt = now;
       lastSeenAt = now;
-      stableGroup.visible = hasLastGoodPose;
-      setAppState('tracking', '구역을 터치해 설명을 확인하세요', 'found', '구역을 터치해 설명을 확인하세요');
+      if (!hasPlacedPose) {
+        previewRoot.visible = hasLastGoodPose;
+      }
     };
 
     anchor.onTargetLost = () => {
       isTargetFound = false;
       poseStats.lostCount += 1;
 
-      if (stableGroup.visible) {
-        setAppState('holding', '인식 유지 중  구역을 터치할 수 있습니다', 'found', '조금 더 위에서 비춰주세요');
+      if (hasPlacedPose) {
+        setStatus('배치 유지 중', 'found', '재스캔이 필요하면 재스캔 버튼을 누르세요.');
+      } else if (previewRoot.visible) {
+        setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
       }
     };
 
@@ -1818,7 +1982,7 @@ async function startAR() {
     assertArLayersCreated();
 
     startButton.classList.add('hidden');
-    setAppState('scan', '교리도 전체가 화면에 들어오게 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
+    setAppState('scan', '교리도를 화면 중앙에 맞춰 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
 
     renderer.setAnimationLoop(() => {
       const now = performance.now();
@@ -1844,6 +2008,9 @@ async function startAR() {
         poseStats.rawCenterY = targetPosition.y;
         poseStats.rawScale = getScaleScalar(targetScale);
         poseStats.rawRotationDeg = getQuaternionZDegrees(targetQuaternion);
+        currentTargetPosition.copy(targetPosition);
+        currentTargetQuaternion.copy(targetQuaternion);
+        currentTargetScale.copy(targetScale);
         foundFrameCount += 1;
 
         const rejectReason = hasLastGoodPose
@@ -1871,10 +2038,52 @@ async function startAR() {
           poseStats.lastRejectReason = '';
         }
 
-        if (acceptedPose && !isStableInitialized) {
-          stableGroup.position.copy(lastGoodPosition);
-          stableGroup.quaternion.copy(lastGoodQuaternion);
-          stableGroup.scale.copy(lastGoodScale);
+        if (acceptedPose && hasPlacedPose) {
+          const placedDelta = getPoseDelta(
+            lastGoodPosition,
+            lastGoodQuaternion,
+            lastGoodScale,
+            placedRoot.position,
+            placedRoot.quaternion,
+            placedRoot.scale,
+          );
+          lastPoseDelta = placedDelta;
+
+          if (
+            placedDelta.position < SOFT_CORRECTION_MAX_POSITION_DELTA &&
+            placedDelta.rotation < SOFT_CORRECTION_MAX_ROTATION_DELTA &&
+            placedDelta.scale < SOFT_CORRECTION_MAX_SCALE_DELTA
+          ) {
+            placedRoot.position.lerp(lastGoodPosition, SOFT_CORRECTION_ALPHA);
+            placedRoot.quaternion.slerp(lastGoodQuaternion, SOFT_CORRECTION_ALPHA);
+            placedRoot.scale.lerp(lastGoodScale, SOFT_CORRECTION_ALPHA);
+            placedPosePosition.copy(placedRoot.position);
+            placedPoseQuaternion.copy(placedRoot.quaternion);
+            placedPoseScale.copy(placedRoot.scale);
+            softCorrectionAppliedCount += 1;
+            driftWarningCounter = 0;
+
+            if (currentAppState === 'drift-warning') {
+              needsRescan = false;
+              setAppState('placed', '배치 완료  구역을 터치하세요', 'found', '구역을 터치해 설명을 확인하세요');
+            }
+          } else {
+            driftWarningCounter += 1;
+
+            if (driftWarningCounter >= DRIFT_WARNING_FRAMES && currentAppState !== 'drift-warning') {
+              needsRescan = true;
+              setAppState(
+                'drift-warning',
+                '위치가 어긋났습니다  재스캔해주세요',
+                'ready',
+                '위치가 어긋났습니다. 재스캔해주세요.',
+              );
+            }
+          }
+        } else if (acceptedPose && !isStableInitialized) {
+          previewRoot.position.copy(lastGoodPosition);
+          previewRoot.quaternion.copy(lastGoodQuaternion);
+          previewRoot.scale.copy(lastGoodScale);
           isStableInitialized = true;
           stableFrameCount = 0;
           overlayOpacity = 1;
@@ -1883,9 +2092,9 @@ async function startAR() {
             lastGoodPosition,
             lastGoodQuaternion,
             lastGoodScale,
-            stableGroup.position,
-            stableGroup.quaternion,
-            stableGroup.scale,
+            previewRoot.position,
+            previewRoot.quaternion,
+            previewRoot.scale,
           );
 
           if (
@@ -1904,15 +2113,15 @@ async function startAR() {
             const didMoveScale = stableDelta.scale > deadbandSettings.scale;
 
             if (didMovePosition) {
-              stableGroup.position.lerp(lastGoodPosition, smoothingSettings.position);
+              previewRoot.position.lerp(lastGoodPosition, smoothingSettings.position);
             }
 
             if (didMoveRotation) {
-              stableGroup.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
+              previewRoot.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
             }
 
             if (didMoveScale) {
-              stableGroup.scale.lerp(lastGoodScale, smoothingSettings.scale);
+              previewRoot.scale.lerp(lastGoodScale, smoothingSettings.scale);
             }
 
             const isQuietFrame = !didMovePosition && !didMoveRotation && !didMoveScale;
@@ -1927,15 +2136,19 @@ async function startAR() {
         }
 
         if (hasLastGoodPose) {
-          stableGroup.visible = true;
+          previewRoot.visible = !hasPlacedPose;
+          previewPosePosition.copy(previewRoot.position);
+          previewPoseQuaternion.copy(previewRoot.quaternion);
+          previewPoseScale.copy(previewRoot.scale);
         }
 
         if (
+          !hasPlacedPose &&
           hasLastGoodPose &&
-          currentAppState === 'tracking' &&
-          (now - foundAt >= FOUND_TO_EXPLORE_MS || foundFrameCount >= MIN_FOUND_FRAMES_FOR_EXPLORE)
+          (currentAppState === 'scan' || currentAppState === 'rescan' || currentAppState === 'lost') &&
+          (now - foundAt >= FOUND_TO_PREVIEW_MS || foundFrameCount >= MIN_FOUND_FRAMES_FOR_PLACE_BUTTON)
         ) {
-          setAppState('explore', '구역을 터치해 설명을 확인하세요', 'found', '구역을 터치해 설명을 확인하세요');
+          setAppState('preview', '인식됨  위치가 맞으면 스캔 종료를 누르세요', 'found', '위치가 맞으면 스캔 종료를 누르세요');
         }
       } else {
         poseStats.found = false;
@@ -1944,36 +2157,44 @@ async function startAR() {
       if (hasLastGoodPose && !acceptedPose) {
         const elapsedSinceGoodPose = now - lastSeenAt;
 
-        if (elapsedSinceGoodPose <= lostHoldMs) {
-          stableGroup.visible = true;
-          overlayOpacity = Math.max(overlayOpacity, 1);
+        if (hasPlacedPose) {
+          placedRoot.visible = true;
+          overlayOpacity = 1;
 
-          if (!isTargetFound && currentAppState !== 'holding') {
-            setAppState('holding', '인식 유지 중  구역을 터치할 수 있습니다', 'found', '조금 더 위에서 비춰주세요');
+          if (!isTargetFound && currentAppState === 'placed') {
+            setStatus('배치 유지 중', 'found', '재스캔이 필요하면 재스캔 버튼을 누르세요.');
           }
+        } else if (elapsedSinceGoodPose <= lostHoldMs) {
+          previewRoot.visible = true;
+          overlayOpacity = Math.max(overlayOpacity, 1);
         } else {
           overlayOpacity = 0;
-          stableGroup.visible = false;
+          previewRoot.visible = false;
           isStableInitialized = false;
           hasLastGoodPose = false;
-            clearSelectedSection(false, 'target lost timeout');
+          clearSelectedSection(false, 'target lost timeout');
 
           if (currentAppState !== 'lost') {
-            setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 화면에 들어오게 비춰주세요');
+            setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도를 화면 중앙에 맞춰 비춰주세요');
           }
         }
       }
 
       overlayMaterial.opacity = overlayOpacity;
+      const visibleRoot = hasPlacedPose ? placedRoot : previewRoot;
       const rawStableDelta = hasRawPose
-        ? getPoseDelta(targetPosition, targetQuaternion, targetScale, stableGroup.position, stableGroup.quaternion, stableGroup.scale)
+        ? getPoseDelta(targetPosition, targetQuaternion, targetScale, visibleRoot.position, visibleRoot.quaternion, visibleRoot.scale)
         : { position: Number.NaN, rotation: Number.NaN, scale: Number.NaN };
-      stableEuler.setFromQuaternion(stableGroup.quaternion, 'XYZ');
-      stableNormal.set(0, 0, 1).applyQuaternion(stableGroup.quaternion).normalize();
+      stableEuler.setFromQuaternion(visibleRoot.quaternion, 'XYZ');
+      stableNormal.set(0, 0, 1).applyQuaternion(visibleRoot.quaternion).normalize();
       camera.getWorldDirection(cameraDirection).normalize();
       const viewingDot = Math.abs(THREE.MathUtils.clamp(stableNormal.dot(cameraDirection), -1, 1));
       const viewingAngleDeg = THREE.MathUtils.radToDeg(Math.acos(viewingDot));
-      const holdRemainingMs = hasLastGoodPose && !isTargetFound ? Math.max(lostHoldMs - (now - lastSeenAt), 0) : 0;
+      const holdRemainingMs = hasPlacedPose
+        ? Number.POSITIVE_INFINITY
+        : hasLastGoodPose && !isTargetFound
+          ? Math.max(lostHoldMs - (now - lastSeenAt), 0)
+          : 0;
       const videoExists = arContainer.querySelector('video') !== null;
       const canvasExists = arContainer.querySelector('canvas') !== null;
       const warningMessages = [
@@ -1981,8 +2202,12 @@ async function startAR() {
         !videoExists ? 'no video element' : '',
         !canvasExists ? 'no canvas element' : '',
         poseStats.rejectedFrames > 12 ? 'pose outlier too frequent' : '',
-        poseStats.lostCount > 4 ? 'target lost too often' : '',
-        viewingAngleDeg > 65 && stableGroup.visible ? 'viewing angle too low' : '',
+        poseStats.lostCount > 4 && !hasPlacedPose ? 'target lost too often' : '',
+        hasPlacedPose && !isTargetFound ? 'target lost but placement held' : '',
+        lastOrientationChangeTime ? 'orientation changed' : '',
+        needsRescan ? 'needs rescan' : '',
+        driftWarningCounter >= DRIFT_WARNING_FRAMES ? 'pose drift too large' : '',
+        viewingAngleDeg > 50 && visibleRoot.visible ? 'viewing angle too low' : '',
         !overlayTexture ? 'overlay not loaded' : '',
         doctrineSections.length === 0 ? 'doctrine_sections.json not loaded' : '',
         hitMeshes.length === 0 ? 'no hotspot hit meshes' : '',
@@ -1993,18 +2218,18 @@ async function startAR() {
         lastTouchWarning,
       ].filter(Boolean);
 
-      if (!activeSectionId && stableGroup.visible && viewingAngleDeg > 65 && !hasWarnedLowAngle) {
+      if (!activeSectionId && visibleRoot.visible && viewingAngleDeg > 50 && !hasWarnedLowAngle) {
         hasWarnedLowAngle = true;
-        setStatus('조금 더 위에서 비춰주세요', 'found', '구역을 터치해 설명을 확인하세요');
-      } else if (viewingAngleDeg <= 55) {
+        setStatus('웹AR에서는 너무 낮은 각도에서 인식이 불안정할 수 있습니다', 'found', '조금 더 위에서 비춰주세요');
+      } else if (viewingAngleDeg <= 35) {
         hasWarnedLowAngle = false;
       }
 
       poseStats.appState = currentAppState;
-      poseStats.smoothedCenterX = stableGroup.position.x;
-      poseStats.smoothedCenterY = stableGroup.position.y;
-      poseStats.smoothedScale = getScaleScalar(stableGroup.scale);
-      poseStats.smoothedRotationDeg = getQuaternionZDegrees(stableGroup.quaternion);
+      poseStats.smoothedCenterX = visibleRoot.position.x;
+      poseStats.smoothedCenterY = visibleRoot.position.y;
+      poseStats.smoothedScale = getScaleScalar(visibleRoot.scale);
+      poseStats.smoothedRotationDeg = getQuaternionZDegrees(visibleRoot.quaternion);
       poseStats.locked = isPoseLocked;
       poseStats.lockMode = lockSettings.enabled;
       poseStats.targetVersion = activeTargetVersion;
@@ -2018,15 +2243,15 @@ async function startAR() {
       poseStats.rawStableDeltaPosition = rawStableDelta.position;
       poseStats.rawStableDeltaRotation = rawStableDelta.rotation;
       poseStats.rawStableDeltaScale = rawStableDelta.scale;
-      poseStats.stablePositionX = stableGroup.position.x;
-      poseStats.stablePositionY = stableGroup.position.y;
-      poseStats.stablePositionZ = stableGroup.position.z;
+      poseStats.stablePositionX = visibleRoot.position.x;
+      poseStats.stablePositionY = visibleRoot.position.y;
+      poseStats.stablePositionZ = visibleRoot.position.z;
       poseStats.stableRotationX = THREE.MathUtils.radToDeg(stableEuler.x);
       poseStats.stableRotationY = THREE.MathUtils.radToDeg(stableEuler.y);
       poseStats.stableRotationZ = THREE.MathUtils.radToDeg(stableEuler.z);
-      poseStats.stableScaleX = stableGroup.scale.x;
-      poseStats.stableScaleY = stableGroup.scale.y;
-      poseStats.stableScaleZ = stableGroup.scale.z;
+      poseStats.stableScaleX = visibleRoot.scale.x;
+      poseStats.stableScaleY = visibleRoot.scale.y;
+      poseStats.stableScaleZ = visibleRoot.scale.z;
       poseStats.viewingAngleDeg = viewingAngleDeg;
       poseStats.videoExists = videoExists;
       poseStats.canvasExists = canvasExists;
@@ -2036,7 +2261,7 @@ async function startAR() {
       poseStats.warningMessages = warningMessages;
       updateSelectionAnimation();
       updateDebugPanel(poseStats);
-      updateDebugCorners(hasRawPose ? rawMatrix : undefined, stableGroup, camera, renderer);
+      updateDebugCorners(hasRawPose ? rawMatrix : undefined, visibleRoot, camera, renderer);
 
       renderer.render(scene, camera);
     });
@@ -2055,6 +2280,8 @@ async function startAR() {
     hotspotPointerCleanup = undefined;
     overlayContentGroup = undefined;
     overlayPlane = undefined;
+    previewRootRef = undefined;
+    placedRootRef = undefined;
     selectionGroup = undefined;
     hasStarted = false;
     setUiCompact(false);
@@ -2164,4 +2391,15 @@ void registerServiceWorker();
 
 startButton.addEventListener('click', () => {
   void startAR();
+});
+
+placementButton.addEventListener('click', () => {
+  if (currentAppState === 'preview') {
+    placeCurrentPose();
+    return;
+  }
+
+  if (currentAppState === 'placed' || currentAppState === 'drift-warning') {
+    rescanCurrentAR('user rescan');
+  }
 });

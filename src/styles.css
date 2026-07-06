@@ -159,6 +159,67 @@ h1 {
   opacity: 0.82;
 }
 
+.scan-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  display: grid;
+  width: min(56vw, 230px);
+  transform: translate(-50%, -50%);
+  place-items: center;
+  gap: 12px;
+  color: rgba(248, 250, 252, 0.86);
+  text-align: center;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  transition: opacity 220ms ease;
+  animation: scan-guide-pulse 1.8s ease-in-out infinite;
+}
+
+.scan-guide.hidden {
+  display: none;
+}
+
+.scan-guide.fading {
+  opacity: 0;
+  animation: none;
+}
+
+.scan-guide svg {
+  width: 100%;
+  aspect-ratio: 100 / 141.5;
+  overflow: visible;
+}
+
+.scan-guide rect,
+.scan-guide line,
+.scan-guide circle {
+  fill: rgba(255, 255, 255, 0.1);
+  stroke: rgba(255, 255, 255, 0.88);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.scan-guide p {
+  max-width: 14rem;
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+@keyframes scan-guide-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+
+  50% {
+    opacity: 0.75;
+  }
+}
+
 .start-button {
   position: absolute;
   left: 20px;
@@ -183,6 +244,36 @@ h1 {
 
 .start-button.hidden {
   display: none;
+}
+
+.placement-button {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom) + 74px);
+  z-index: 9;
+  min-width: min(220px, calc(100vw - 40px));
+  min-height: 46px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 8px;
+  color: #07120d;
+  background: #facc15;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.34);
+  pointer-events: auto;
+}
+
+.placement-button.hidden {
+  display: none;
+}
+
+.ui-overlay:has(.section-card:not(.hidden)) .placement-button {
+  bottom: calc(env(safe-area-inset-bottom) + min(48vh, 360px));
+}
+
+.section-card:not(.hidden) ~ .status-panel {
+  bottom: calc(env(safe-area-inset-bottom) + 12px);
 }
 
 .info-button {
