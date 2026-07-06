@@ -71,6 +71,22 @@ https://cybox-digital-entertainment.github.io/WonXR/?ps=0.12&rs=0.12&ss=0.12&hol
 - `warmup`: MindAR warmupTolerance
 - `miss`: MindAR missTolerance
 
+디버그 모드:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?debug=1
+```
+
+디버그 모드는 화면에 target found/lost, raw center, smoothed center, raw/smoothed scale, raw/smoothed rotation, rejected frame count를 표시합니다.
+파란 선은 raw target plane, 붉은 선은 smoothed overlay plane입니다.
+검출 pose가 튀는지, 오버레이 적용이 틀어지는지 구분할 때 사용합니다.
+
+outlier 판정값도 URL로 조정할 수 있습니다.
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/?debug=1&scaleOutlier=0.15&rotOutlier=10&posOutlier=0.1
+```
+
 ## GitHub Pages 배포
 
 이 프로젝트는 `.github/workflows/deploy.yml` workflow로 `dist/` 빌드 결과를 `gh-pages` 브랜치 루트에 배포합니다.

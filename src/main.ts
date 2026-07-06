@@ -13,10 +13,14 @@ const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
 
-const POSITION_SMOOTHING = 0.18;
-const ROTATION_SMOOTHING = 0.18;
-const SCALE_SMOOTHING = 0.18;
+const POSITION_SMOOTHING = 0.15;
+const ROTATION_SMOOTHING = 0.15;
+const SCALE_SMOOTHING = 0.15;
 const LOST_HOLD_MS = 400;
+const FADE_OUT_MS = 250;
+const SCALE_OUTLIER_RATIO = 0.15;
+const ROTATION_OUTLIER_DEG = 10;
+const POSITION_OUTLIER_RATIO = 0.1;
 
 const TRACKING_FILTER_MIN_CF = 0.001;
 const TRACKING_FILTER_BETA = 50;
@@ -27,6 +31,7 @@ const CALIBRATION_STORAGE_KEY = 'wonxr-overlay-calibration';
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
 const queryParams = new URLSearchParams(window.location.search);
 const isCalibrationMode = queryParams.get('cal') === '1';
+const isDebugMode = queryParams.get('debug') === '1';
 
 type OverlayCalibration = {
   scaleX: number;
@@ -140,6 +145,12 @@ const trackingSettings = {
 };
 
 const lostHoldMs = readNonNegativeNumberParam('hold', LOST_HOLD_MS);
+const fadeOutMs = readNonNegativeNumberParam('fade', FADE_OUT_MS);
+const outlierSettings = {
+  scaleRatio: readNonNegativeNumberParam('scaleOutlier', SCALE_OUTLIER_RATIO),
+  rotationDeg: readNonNegativeNumberParam('rotOutlier', ROTATION_OUTLIER_DEG),
+  positionRatio: readNonNegativeNumberParam('posOutlier', POSITION_OUTLIER_RATIO),
+};
 
 console.log('WonXR AR config', {
   targetMindPath: TARGET_MIND_PATH,
@@ -155,7 +166,9 @@ console.log('WonXR AR config', {
   },
   tracking: trackingSettings,
   smoothing: smoothingSettings,
+  outlier: outlierSettings,
   holdMs: lostHoldMs,
+  fadeOutMs,
 });
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -199,6 +212,13 @@ app.innerHTML = `
       </div>
     </aside>
 
+    <svg id="debug-overlay" class="debug-overlay${isDebugMode ? '' : ' hidden'}" aria-hidden="true">
+      <polyline id="debug-target-corners" class="debug-line debug-line-target" points=""></polyline>
+      <polyline id="debug-overlay-corners" class="debug-line debug-line-overlay" points=""></polyline>
+    </svg>
+
+    <pre id="debug-panel" class="debug-panel${isDebugMode ? '' : ' hidden'}"></pre>
+
     <div class="status-panel" role="status" aria-live="polite">
       <span id="status-dot" class="status-dot waiting"></span>
       <span id="status-text">다시 교리도를 비춰주세요</span>
@@ -223,12 +243,30 @@ const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
 const message = requireElement<HTMLParagraphElement>('#message');
 const calibrationValues = requireElement<HTMLSpanElement>('#calibration-values');
+const debugPanel = requireElement<HTMLPreElement>('#debug-panel');
+const debugOverlay = requireElement<SVGSVGElement>('#debug-overlay');
+const debugTargetCorners = requireElement<SVGPolylineElement>('#debug-target-corners');
+const debugOverlayCorners = requireElement<SVGPolylineElement>('#debug-overlay-corners');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
 
 let mindarThree: MindARThree | undefined;
 let hasStarted = false;
 let overlayPlane: THREE.Mesh | undefined;
+
+type PoseStats = {
+  found: boolean;
+  rawCenterX: number;
+  rawCenterY: number;
+  smoothedCenterX: number;
+  smoothedCenterY: number;
+  rawScale: number;
+  smoothedScale: number;
+  rawRotationDeg: number;
+  smoothedRotationDeg: number;
+  rejectedFrames: number;
+  lastRejectReason: string;
+};
 
 type StatusTone = 'waiting' | 'ready' | 'found' | 'error';
 
@@ -347,6 +385,144 @@ function assertArLayersCreated() {
   }
 }
 
+function getScaleScalar(scale: THREE.Vector3) {
+  return (Math.abs(scale.x) + Math.abs(scale.y)) / 2;
+}
+
+function getQuaternionZDegrees(quaternion: THREE.Quaternion) {
+  const euler = new THREE.Euler().setFromQuaternion(quaternion, 'XYZ');
+  return THREE.MathUtils.radToDeg(euler.z);
+}
+
+function isFiniteVector3(vector: THREE.Vector3) {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
+}
+
+function getPoseRejectReason(
+  rawPosition: THREE.Vector3,
+  rawQuaternion: THREE.Quaternion,
+  rawScale: THREE.Vector3,
+  lastGoodPosition: THREE.Vector3,
+  lastGoodQuaternion: THREE.Quaternion,
+  lastGoodScaleScalar: number,
+) {
+  if (!isFiniteVector3(rawPosition) || !isFiniteVector3(rawScale)) {
+    return 'non-finite pose';
+  }
+
+  const rawScaleScalar = getScaleScalar(rawScale);
+
+  if (!Number.isFinite(rawScaleScalar) || rawScaleScalar <= 0) {
+    return 'invalid scale';
+  }
+
+  const scaleRatio = Math.abs(rawScaleScalar / Math.max(lastGoodScaleScalar, 0.0001) - 1);
+  const rotationDeltaDeg = THREE.MathUtils.radToDeg(lastGoodQuaternion.angleTo(rawQuaternion));
+  const positionDelta = rawPosition.distanceTo(lastGoodPosition);
+  const positionLimit = Math.max(TARGET_WIDTH * Math.max(lastGoodScaleScalar, 0.0001) * outlierSettings.positionRatio, 0.002);
+
+  if (scaleRatio > outlierSettings.scaleRatio) {
+    return `scale ${scaleRatio.toFixed(3)}`;
+  }
+
+  if (rotationDeltaDeg > outlierSettings.rotationDeg) {
+    return `rotation ${rotationDeltaDeg.toFixed(1)}deg`;
+  }
+
+  if (positionDelta > positionLimit) {
+    return `position ${positionDelta.toFixed(3)}`;
+  }
+
+  return '';
+}
+
+function formatDebugNumber(value: number) {
+  if (!Number.isFinite(value)) {
+    return '-';
+  }
+
+  return value.toFixed(3);
+}
+
+function updateDebugPanel(stats: PoseStats) {
+  if (!isDebugMode) {
+    return;
+  }
+
+  debugPanel.textContent = [
+    `target: ${stats.found ? 'found' : 'lost'}`,
+    `raw center: ${formatDebugNumber(stats.rawCenterX)}, ${formatDebugNumber(stats.rawCenterY)}`,
+    `smooth center: ${formatDebugNumber(stats.smoothedCenterX)}, ${formatDebugNumber(stats.smoothedCenterY)}`,
+    `raw scale: ${formatDebugNumber(stats.rawScale)}`,
+    `smooth scale: ${formatDebugNumber(stats.smoothedScale)}`,
+    `raw rot: ${formatDebugNumber(stats.rawRotationDeg)}deg`,
+    `smooth rot: ${formatDebugNumber(stats.smoothedRotationDeg)}deg`,
+    `rejected: ${stats.rejectedFrames}`,
+    `reason: ${stats.lastRejectReason || '-'}`,
+  ].join('\n');
+}
+
+const targetCornerPoints = [
+  new THREE.Vector3(-TARGET_WIDTH / 2, TARGET_HEIGHT / 2, 0),
+  new THREE.Vector3(TARGET_WIDTH / 2, TARGET_HEIGHT / 2, 0),
+  new THREE.Vector3(TARGET_WIDTH / 2, -TARGET_HEIGHT / 2, 0),
+  new THREE.Vector3(-TARGET_WIDTH / 2, -TARGET_HEIGHT / 2, 0),
+];
+
+function projectCorners(matrix: THREE.Matrix4, camera: THREE.Camera, renderer: THREE.WebGLRenderer) {
+  const rect = renderer.domElement.getBoundingClientRect();
+
+  return targetCornerPoints.map((corner) => {
+    const projected = corner.clone().applyMatrix4(matrix).project(camera);
+    return {
+      x: (projected.x * 0.5 + 0.5) * rect.width + rect.left,
+      y: (-projected.y * 0.5 + 0.5) * rect.height + rect.top,
+    };
+  });
+}
+
+function setDebugPolyline(polyline: SVGPolylineElement, points: Array<{ x: number; y: number }>) {
+  const closedPoints = [...points, points[0]];
+  polyline.setAttribute('points', closedPoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' '));
+}
+
+function clearDebugPolylines() {
+  if (!isDebugMode) {
+    return;
+  }
+
+  debugTargetCorners.setAttribute('points', '');
+  debugOverlayCorners.setAttribute('points', '');
+}
+
+function updateDebugCorners(
+  rawMatrix: THREE.Matrix4 | undefined,
+  stableGroup: THREE.Group,
+  camera: THREE.Camera,
+  renderer: THREE.WebGLRenderer,
+) {
+  if (!isDebugMode) {
+    return;
+  }
+
+  debugOverlay.setAttribute('viewBox', `0 0 ${window.innerWidth} ${window.innerHeight}`);
+
+  if (rawMatrix) {
+    setDebugPolyline(debugTargetCorners, projectCorners(rawMatrix, camera, renderer));
+  } else {
+    debugTargetCorners.setAttribute('points', '');
+  }
+
+  stableGroup.updateMatrixWorld(true);
+  overlayPlane?.updateMatrixWorld(true);
+
+  if (overlayPlane && stableGroup.visible) {
+    setDebugPolyline(debugOverlayCorners, projectCorners(overlayPlane.matrixWorld, camera, renderer));
+  } else {
+    debugOverlayCorners.setAttribute('points', '');
+  }
+}
+
 async function loadOverlayTexture() {
   const loader = new THREE.TextureLoader();
   const texture = await loader.loadAsync(assetUrl(OVERLAY_IMAGE_PATH));
@@ -402,9 +578,29 @@ async function startAR() {
     const targetPosition = new THREE.Vector3();
     const targetQuaternion = new THREE.Quaternion();
     const targetScale = new THREE.Vector3();
+    const rawMatrix = new THREE.Matrix4();
+    const lastGoodPosition = new THREE.Vector3();
+    const lastGoodQuaternion = new THREE.Quaternion();
+    const lastGoodScale = new THREE.Vector3(1, 1, 1);
+    const poseStats: PoseStats = {
+      found: false,
+      rawCenterX: Number.NaN,
+      rawCenterY: Number.NaN,
+      smoothedCenterX: Number.NaN,
+      smoothedCenterY: Number.NaN,
+      rawScale: Number.NaN,
+      smoothedScale: Number.NaN,
+      rawRotationDeg: Number.NaN,
+      smoothedRotationDeg: Number.NaN,
+      rejectedFrames: 0,
+      lastRejectReason: '',
+    };
 
     let isTargetFound = false;
     let isStableInitialized = false;
+    let hasLastGoodPose = false;
+    let lastGoodScaleScalar = 1;
+    let overlayOpacity = 0;
     let lastSeenAt = 0;
     let foundAt = 0;
     let statusMode: 'waiting' | 'smoothing' | 'found' = 'waiting';
@@ -419,6 +615,7 @@ async function startAR() {
     const overlayMaterial = new THREE.MeshBasicMaterial({
       map: overlayTexture,
       transparent: true,
+      opacity: overlayOpacity,
       depthTest: false,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -434,7 +631,7 @@ async function startAR() {
       isTargetFound = true;
       foundAt = now;
       lastSeenAt = now;
-      stableGroup.visible = true;
+      stableGroup.visible = hasLastGoodPose;
       setUiCompact(true);
       statusMode = 'smoothing';
       setStatus('인식됨  안정화 중', 'found', '추적 위치를 부드럽게 보정하고 있습니다.');
@@ -457,36 +654,101 @@ async function startAR() {
 
     renderer.setAnimationLoop(() => {
       const now = performance.now();
+      let acceptedPose = false;
+      let hasRawPose = false;
 
       if (isTargetFound) {
         anchor.group.updateMatrixWorld(true);
-        anchor.group.matrixWorld.decompose(targetPosition, targetQuaternion, targetScale);
+        rawMatrix.copy(anchor.group.matrixWorld);
+        rawMatrix.decompose(targetPosition, targetQuaternion, targetScale);
+        hasRawPose = true;
 
-        if (!isStableInitialized) {
-          stableGroup.position.copy(targetPosition);
-          stableGroup.quaternion.copy(targetQuaternion);
-          stableGroup.scale.copy(targetScale);
-          isStableInitialized = true;
+        poseStats.found = true;
+        poseStats.rawCenterX = targetPosition.x;
+        poseStats.rawCenterY = targetPosition.y;
+        poseStats.rawScale = getScaleScalar(targetScale);
+        poseStats.rawRotationDeg = getQuaternionZDegrees(targetQuaternion);
+
+        const rejectReason = hasLastGoodPose
+          ? getPoseRejectReason(
+              targetPosition,
+              targetQuaternion,
+              targetScale,
+              lastGoodPosition,
+              lastGoodQuaternion,
+              lastGoodScaleScalar,
+            )
+          : '';
+
+        if (rejectReason) {
+          poseStats.rejectedFrames += 1;
+          poseStats.lastRejectReason = rejectReason;
+          statusMode = 'smoothing';
+          setStatus('인식됨  안정화 중', 'found', `불안정한 프레임을 유지 중입니다: ${rejectReason}`);
         } else {
-          stableGroup.position.lerp(targetPosition, smoothingSettings.position);
-          stableGroup.quaternion.slerp(targetQuaternion, smoothingSettings.rotation);
-          stableGroup.scale.lerp(targetScale, smoothingSettings.scale);
+          lastGoodPosition.copy(targetPosition);
+          lastGoodQuaternion.copy(targetQuaternion);
+          lastGoodScale.copy(targetScale);
+          lastGoodScaleScalar = Math.max(getScaleScalar(targetScale), 0.0001);
+          hasLastGoodPose = true;
+          lastSeenAt = now;
+          acceptedPose = true;
+          poseStats.lastRejectReason = '';
         }
 
-        lastSeenAt = now;
-        stableGroup.visible = true;
+        if (acceptedPose && !isStableInitialized) {
+          stableGroup.position.copy(lastGoodPosition);
+          stableGroup.quaternion.copy(lastGoodQuaternion);
+          stableGroup.scale.copy(lastGoodScale);
+          isStableInitialized = true;
+          overlayOpacity = 1;
+        } else if (acceptedPose) {
+          stableGroup.position.lerp(lastGoodPosition, smoothingSettings.position);
+          stableGroup.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
+          stableGroup.scale.lerp(lastGoodScale, smoothingSettings.scale);
+          overlayOpacity += (1 - overlayOpacity) * 0.25;
+        }
 
-        if (statusMode !== 'found' && now - foundAt > 700) {
+        if (hasLastGoodPose) {
+          stableGroup.visible = true;
+        }
+
+        if (acceptedPose && statusMode !== 'found' && now - foundAt > 700) {
           statusMode = 'found';
           setStatus('인식됨', 'found', '교리도 오버레이를 표시하고 있습니다.');
         }
-      } else if (stableGroup.visible && now - lastSeenAt > lostHoldMs) {
-        stableGroup.visible = false;
-        isStableInitialized = false;
-        statusMode = 'waiting';
-        setUiCompact(false);
-        setStatus('다시 교리도를 비춰주세요', 'waiting', '교리도 그림이 화면 안에 들어오도록 맞춰주세요.');
+      } else {
+        poseStats.found = false;
       }
+
+      if (hasLastGoodPose && !acceptedPose) {
+        const elapsedSinceGoodPose = now - lastSeenAt;
+
+        if (elapsedSinceGoodPose <= lostHoldMs) {
+          stableGroup.visible = true;
+          overlayOpacity = Math.max(overlayOpacity, 1);
+        } else {
+          const fadeProgress = fadeOutMs > 0 ? Math.min((elapsedSinceGoodPose - lostHoldMs) / fadeOutMs, 1) : 1;
+          overlayOpacity = Math.max(1 - fadeProgress, 0);
+
+          if (overlayOpacity <= 0) {
+            stableGroup.visible = false;
+            isStableInitialized = false;
+            hasLastGoodPose = false;
+            statusMode = 'waiting';
+            setUiCompact(false);
+            setStatus('다시 교리도를 비춰주세요', 'waiting', '교리도 그림이 화면 안에 들어오도록 맞춰주세요.');
+          }
+        }
+      }
+
+      overlayMaterial.opacity = overlayOpacity;
+      poseStats.smoothedCenterX = stableGroup.position.x;
+      poseStats.smoothedCenterY = stableGroup.position.y;
+      poseStats.smoothedScale = getScaleScalar(stableGroup.scale);
+      poseStats.smoothedRotationDeg = getQuaternionZDegrees(stableGroup.quaternion);
+      updateDebugPanel(poseStats);
+      updateDebugCorners(hasRawPose ? rawMatrix : undefined, stableGroup, camera, renderer);
 
       renderer.render(scene, camera);
     });

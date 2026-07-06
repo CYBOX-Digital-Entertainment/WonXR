@@ -255,6 +255,55 @@ h1 {
   background: rgba(110, 231, 183, 0.26);
 }
 
+.debug-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+}
+
+.debug-overlay.hidden,
+.debug-panel.hidden {
+  display: none;
+}
+
+.debug-line {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.debug-line-target {
+  stroke: rgba(56, 189, 248, 0.95);
+}
+
+.debug-line-overlay {
+  stroke: rgba(251, 113, 133, 0.95);
+}
+
+.debug-panel {
+  position: absolute;
+  left: 12px;
+  bottom: calc(env(safe-area-inset-bottom) + 74px);
+  z-index: 12;
+  width: min(230px, calc(100vw - 24px));
+  margin: 0;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(9, 12, 15, 0.76);
+  color: #dbeafe;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.66rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
 .status-dot {
   width: 10px;
   height: 10px;
