@@ -14,6 +14,9 @@ const OVERLAY_SCALE_Y = 1.0;
 const OVERLAY_OFFSET_X = 0.0;
 const OVERLAY_OFFSET_Y = 0.0;
 const OVERLAY_ROTATION_Z = 0.0;
+const HIT_AREA_PADDING = 0.012;
+const SELECTION_RISE = 0.055;
+const SELECTION_DEPTH = 0.035;
 
 const POSITION_SMOOTHING = 0.1;
 const ROTATION_SMOOTHING = 0.1;
@@ -41,6 +44,7 @@ const queryParams = new URLSearchParams(window.location.search);
 const isCalibrationMode = queryParams.get('cal') === '1';
 const isDebugMode = queryParams.get('debug') === '1';
 const isHotspotMode = queryParams.get('hotspots') === '1';
+const requestedTargetVersion = queryParams.get('target') === 'v1' ? 'v1' : 'v2';
 const requestedProfile = queryParams.get('profile');
 const trackingProfile = requestedProfile === 'responsive' || requestedProfile === 'locked' ? requestedProfile : 'smooth';
 
@@ -70,6 +74,9 @@ type ProfileSettings = {
 type DoctrineSection = {
   id: string;
   title: string;
+  subtitle?: string;
+  children?: string[];
+  content?: string;
   color?: string;
   hotspot: {
     nx: number;
@@ -241,8 +248,10 @@ const lockSettings = {
   breakPosition: readNonNegativeNumberParam('lbp', LOCK_BREAK_POSITION_DELTA),
   breakRotation: readNonNegativeNumberParam('lbr', LOCK_BREAK_ROTATION_DELTA),
 };
+const hitAreaPadding = readNonNegativeNumberParam('hitpad', HIT_AREA_PADDING);
 
 console.log('WonXR AR config', {
+  targetVersion: requestedTargetVersion,
   targetMindPath: getRequestedTargetMindPath(),
   targetMindUrl: assetUrl(getRequestedTargetMindPath()),
   overlayPath: OVERLAY_IMAGE_PATH,
@@ -264,6 +273,7 @@ console.log('WonXR AR config', {
     enabled: isHotspotMode,
     dataPath: HOTSPOT_DATA_PATH,
     dataUrl: assetUrl(HOTSPOT_DATA_PATH),
+    hitAreaPadding,
   },
   holdMs: lostHoldMs,
   fadeOutMs,
@@ -317,6 +327,20 @@ app.innerHTML = `
 
     <pre id="debug-panel" class="debug-panel${isDebugMode ? '' : ' hidden'}"></pre>
 
+    <section id="section-card" class="section-card hidden" aria-live="polite">
+      <div class="section-card-header">
+        <div>
+          <p id="section-card-kicker" class="section-card-kicker">선택 구역</p>
+          <h2 id="section-card-title"></h2>
+        </div>
+        <button id="section-card-close" class="section-card-close" type="button" aria-label="설명 닫기">닫기</button>
+      </div>
+      <p id="section-card-subtitle" class="section-card-subtitle"></p>
+      <div id="section-card-children" class="section-card-children"></div>
+      <p id="section-card-content" class="section-card-content"></p>
+      <p class="section-card-note">교무님 검수 후 내용 입력 예정</p>
+    </section>
+
     <div class="status-panel" role="status" aria-live="polite">
       <span id="status-dot" class="status-dot waiting"></span>
       <span id="status-text">다시 교리도를 비춰주세요</span>
@@ -345,18 +369,28 @@ const debugPanel = requireElement<HTMLPreElement>('#debug-panel');
 const debugOverlay = requireElement<SVGSVGElement>('#debug-overlay');
 const debugTargetCorners = requireElement<SVGPolylineElement>('#debug-target-corners');
 const debugOverlayCorners = requireElement<SVGPolylineElement>('#debug-overlay-corners');
+const sectionCard = requireElement<HTMLElement>('#section-card');
+const sectionCardKicker = requireElement<HTMLParagraphElement>('#section-card-kicker');
+const sectionCardTitle = requireElement<HTMLHeadingElement>('#section-card-title');
+const sectionCardSubtitle = requireElement<HTMLParagraphElement>('#section-card-subtitle');
+const sectionCardChildren = requireElement<HTMLDivElement>('#section-card-children');
+const sectionCardContent = requireElement<HTMLParagraphElement>('#section-card-content');
+const sectionCardClose = requireElement<HTMLButtonElement>('#section-card-close');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
 
 let mindarThree: MindARThree | undefined;
 let hasStarted = false;
 let overlayPlane: THREE.Mesh | undefined;
+let selectionGroup: THREE.Group | undefined;
 let activeSectionId = '';
+let activeTargetVersion = requestedTargetVersion;
 
 type PoseStats = {
   found: boolean;
   locked: boolean;
   profile: TrackingProfile;
+  targetVersion: string;
   holdMs: number;
   rawCenterX: number;
   rawCenterY: number;
@@ -489,28 +523,28 @@ function assertArLayersCreated() {
 }
 
 function getRequestedTargetMindPath() {
-  return queryParams.get('target') === 'v2' ? TARGET_MIND_V2_PATH : TARGET_MIND_PATH;
+  return requestedTargetVersion === 'v1' ? TARGET_MIND_PATH : TARGET_MIND_V2_PATH;
 }
 
 async function resolveTargetMindPath() {
   const requestedTargetMindPath = getRequestedTargetMindPath();
 
   if (requestedTargetMindPath === TARGET_MIND_PATH) {
-    return TARGET_MIND_PATH;
+    return { path: TARGET_MIND_PATH, version: 'v1' };
   }
 
   try {
     const response = await fetch(assetUrl(requestedTargetMindPath), { method: 'HEAD' });
 
     if (response.ok) {
-      return requestedTargetMindPath;
+      return { path: requestedTargetMindPath, version: 'v2' };
     }
   } catch (error) {
     console.warn('Failed to check v2 target file. Falling back to default target.', error);
   }
 
   console.warn(`Target file not found: ${requestedTargetMindPath}. Falling back to ${TARGET_MIND_PATH}.`);
-  return TARGET_MIND_PATH;
+  return { path: TARGET_MIND_PATH, version: 'v1' };
 }
 
 async function loadDoctrineSections() {
@@ -604,6 +638,7 @@ function updateDebugPanel(stats: PoseStats) {
 
   debugPanel.textContent = [
     `target: ${stats.found ? 'found' : 'lost'}`,
+    `target version: ${stats.targetVersion}`,
     `locked: ${stats.locked ? 'yes' : 'no'}`,
     `profile: ${stats.profile}`,
     `ps/rs/ss: ${smoothingSettings.position}/${smoothingSettings.rotation}/${smoothingSettings.scale}`,
@@ -727,22 +762,35 @@ function createLabelSprite(text: string, color: THREE.Color) {
   return sprite;
 }
 
+function getSectionRect(section: DoctrineSection, padding = 0) {
+  const width = section.hotspot.nw * TARGET_WIDTH + padding * 2;
+  const height = section.hotspot.nh * TARGET_HEIGHT + padding * 2;
+  const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * TARGET_WIDTH;
+  const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * TARGET_HEIGHT;
+  return { centerX, centerY, width, height };
+}
+
+function getSectionColor(section: DoctrineSection) {
+  const color = new THREE.Color();
+  color.setStyle(section.color ?? '#6ee7b7');
+  return color;
+}
+
 function createHotspotDebugGroup(sections: DoctrineSection[]) {
   const group = new THREE.Group();
+  const debugGroup = new THREE.Group();
+  const hitGroup = new THREE.Group();
   const hitMeshes: THREE.Mesh[] = [];
-  group.visible = isHotspotMode;
+  debugGroup.visible = isHotspotMode;
 
   sections.forEach((section, index) => {
-    const color = new THREE.Color();
-    color.setStyle(section.color ?? '#6ee7b7');
-    const width = section.hotspot.nw * TARGET_WIDTH;
-    const height = section.hotspot.nh * TARGET_HEIGHT;
-    const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * TARGET_WIDTH;
-    const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * TARGET_HEIGHT;
+    const color = getSectionColor(section);
+    const { centerX, centerY, width, height } = getSectionRect(section);
+    const hitRect = getSectionRect(section, hitAreaPadding);
     const sectionGroup = new THREE.Group();
     sectionGroup.position.set(centerX, centerY, 0.004);
 
-    const fillMaterial = new THREE.MeshBasicMaterial({
+    const debugFillMaterial = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
       opacity: 0.08,
@@ -750,10 +798,23 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
       depthWrite: false,
       side: THREE.DoubleSide,
     });
-    const hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), fillMaterial);
-    hitMesh.renderOrder = 20;
+    const debugFill = new THREE.Mesh(new THREE.PlaneGeometry(width, height), debugFillMaterial);
+    debugFill.renderOrder = 20;
+    sectionGroup.add(debugFill);
+
+    const hitMaterial = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.001,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const hitMesh = new THREE.Mesh(new THREE.PlaneGeometry(hitRect.width, hitRect.height), hitMaterial);
+    hitMesh.position.set(hitRect.centerX, hitRect.centerY, 0.01);
+    hitMesh.renderOrder = 30;
     hitMesh.userData.section = section;
-    sectionGroup.add(hitMesh);
+    hitGroup.add(hitMesh);
     hitMeshes.push(hitMesh);
 
     const halfWidth = width / 2;
@@ -778,14 +839,22 @@ function createHotspotDebugGroup(sections: DoctrineSection[]) {
     const label = createLabelSprite(`${index + 1}. ${section.title}`, color);
     label.position.set(0, halfHeight + 0.028, 0.006);
     sectionGroup.add(label);
-    group.add(sectionGroup);
+    debugGroup.add(sectionGroup);
   });
+
+  group.add(hitGroup);
+  group.add(debugGroup);
 
   return { group, hitMeshes };
 }
 
-function setupHotspotPointer(camera: THREE.Camera, hitMeshes: THREE.Mesh[], isStableVisible: () => boolean) {
-  if (!isHotspotMode || hitMeshes.length === 0) {
+function setupHotspotPointer(
+  camera: THREE.Camera,
+  hitMeshes: THREE.Mesh[],
+  isStableVisible: () => boolean,
+  onSelect: (section: DoctrineSection) => void,
+) {
+  if (hitMeshes.length === 0) {
     return;
   }
 
@@ -797,7 +866,7 @@ function setupHotspotPointer(camera: THREE.Camera, hitMeshes: THREE.Mesh[], isSt
     (event) => {
       const target = event.target;
 
-      if (target instanceof Element && target.closest('.calibration-panel, button')) {
+      if (target instanceof Element && target.closest('.calibration-panel, .section-card, button')) {
         return;
       }
 
@@ -817,9 +886,122 @@ function setupHotspotPointer(camera: THREE.Camera, hitMeshes: THREE.Mesh[], isSt
 
       activeSectionId = section.id;
       console.log('WonXR hotspot selected', { id: section.id, title: section.title });
+      onSelect(section);
     },
     { passive: true },
   );
+}
+
+function createSelectionGroup(section: DoctrineSection) {
+  const color = getSectionColor(section);
+  const { centerX, centerY, width, height } = getSectionRect(section);
+  const group = new THREE.Group();
+  group.position.set(centerX, centerY, 0.006);
+  group.scale.setScalar(0.98);
+  group.userData.startTime = performance.now();
+
+  const highlightMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.22,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const highlightPlane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), highlightMaterial);
+  highlightPlane.position.z = 0.002;
+  highlightPlane.renderOrder = 40;
+  group.add(highlightPlane);
+
+  const boxMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.3,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const raisedBox = new THREE.Mesh(new THREE.BoxGeometry(width, height, SELECTION_DEPTH), boxMaterial);
+  raisedBox.position.z = SELECTION_DEPTH / 2;
+  raisedBox.renderOrder = 42;
+  group.add(raisedBox);
+
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const outlineGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-halfWidth, halfHeight, SELECTION_DEPTH + 0.004),
+    new THREE.Vector3(halfWidth, halfHeight, SELECTION_DEPTH + 0.004),
+    new THREE.Vector3(halfWidth, -halfHeight, SELECTION_DEPTH + 0.004),
+    new THREE.Vector3(-halfWidth, -halfHeight, SELECTION_DEPTH + 0.004),
+  ]);
+  const outlineMaterial = new THREE.LineBasicMaterial({
+    color: '#facc15',
+    transparent: true,
+    opacity: 0.98,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const outline = new THREE.LineLoop(outlineGeometry, outlineMaterial);
+  outline.renderOrder = 44;
+  group.add(outline);
+
+  const label = createLabelSprite(section.title, color);
+  label.position.set(0, halfHeight + 0.045, SELECTION_DEPTH + 0.018);
+  label.scale.set(0.24, 0.06, 1);
+  group.add(label);
+
+  return group;
+}
+
+function updateSelectionAnimation() {
+  if (!selectionGroup) {
+    return;
+  }
+
+  const startTime = Number(selectionGroup.userData.startTime ?? performance.now());
+  const progress = Math.min((performance.now() - startTime) / 250, 1);
+  const easedProgress = 1 - (1 - progress) ** 3;
+  selectionGroup.position.z = THREE.MathUtils.lerp(0.006, SELECTION_RISE, easedProgress);
+  const scale = THREE.MathUtils.lerp(0.98, 1, easedProgress);
+  selectionGroup.scale.setScalar(scale);
+}
+
+function showSectionCard(section: DoctrineSection) {
+  sectionCard.classList.remove('hidden');
+  sectionCardKicker.textContent = '선택 구역';
+  sectionCardTitle.textContent = section.title;
+  sectionCardSubtitle.textContent = section.subtitle ?? '';
+  sectionCardChildren.innerHTML = '';
+
+  for (const child of section.children ?? []) {
+    const badge = document.createElement('span');
+    badge.className = 'section-card-badge';
+    badge.textContent = child;
+    sectionCardChildren.appendChild(badge);
+  }
+
+  sectionCardContent.textContent = section.content || '작성 예정';
+}
+
+function clearSelectedSection() {
+  activeSectionId = '';
+  sectionCard.classList.add('hidden');
+  selectionGroup?.removeFromParent();
+  selectionGroup = undefined;
+  setStatus('인식됨', 'found', '교리도 오버레이를 표시하고 있습니다.');
+}
+
+function selectSection(section: DoctrineSection) {
+  if (activeSectionId === section.id) {
+    return;
+  }
+
+  activeSectionId = section.id;
+  selectionGroup?.removeFromParent();
+  selectionGroup = createSelectionGroup(section);
+  overlayPlane?.add(selectionGroup);
+  showSectionCard(section);
+  setUiCompact(true);
+  setStatus(`선택됨: ${section.title}`, 'found', section.subtitle ?? '선택한 구역 정보를 표시합니다.');
 }
 
 async function startAR() {
@@ -844,20 +1026,22 @@ async function startAR() {
   setStatus('인식 대기', 'ready', '카메라 권한을 요청합니다.');
 
   try {
-    const [overlayTexture, doctrineSections, targetMindPath] = await Promise.all([
+    const [overlayTexture, doctrineSections, targetMind] = await Promise.all([
       loadOverlayTexture(),
       loadDoctrineSections(),
       resolveTargetMindPath(),
     ]);
 
     console.log('WonXR target and hotspot data resolved', {
-      targetMindPath,
+      targetMindPath: targetMind.path,
+      targetVersion: targetMind.version,
       sections: doctrineSections.length,
     });
+    activeTargetVersion = targetMind.version;
 
     mindarThree = new MindARThree({
       container: arContainer,
-      imageTargetSrc: assetUrl(targetMindPath),
+      imageTargetSrc: assetUrl(targetMind.path),
       uiLoading: 'no',
       uiScanning: 'no',
       uiError: 'no',
@@ -884,6 +1068,7 @@ async function startAR() {
       found: false,
       locked: false,
       profile: trackingProfile,
+      targetVersion: activeTargetVersion,
       holdMs: lostHoldMs,
       rawCenterX: Number.NaN,
       rawCenterY: Number.NaN,
@@ -930,7 +1115,7 @@ async function startAR() {
     stableGroup.add(overlayPlane);
     const { group: hotspotDebugGroup, hitMeshes: hotspotHitMeshes } = createHotspotDebugGroup(doctrineSections);
     overlayPlane.add(hotspotDebugGroup);
-    setupHotspotPointer(camera, hotspotHitMeshes, () => stableGroup.visible);
+    setupHotspotPointer(camera, hotspotHitMeshes, () => stableGroup.visible, selectSection);
     applyOverlayCalibration();
 
     anchor.onTargetFound = () => {
@@ -1102,6 +1287,7 @@ async function startAR() {
       poseStats.smoothedRotationDeg = getQuaternionZDegrees(stableGroup.quaternion);
       poseStats.locked = isPoseLocked;
       poseStats.activeSectionId = activeSectionId;
+      updateSelectionAnimation();
       updateDebugPanel(poseStats);
       updateDebugCorners(hasRawPose ? rawMatrix : undefined, stableGroup, camera, renderer);
 
@@ -1157,6 +1343,10 @@ for (const button of calibrationActionButtons) {
     }
   });
 }
+
+sectionCardClose.addEventListener('click', () => {
+  clearSelectedSection();
+});
 
 window.addEventListener('beforeunload', () => {
   mindarThree?.stop();

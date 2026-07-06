@@ -1,7 +1,8 @@
 # WonXR 교리도 WebAR MVP
 
 Vite + TypeScript + Three.js + MindAR 기반 WebAR MVP입니다.
-카메라가 `gyorido_empty.mind` 타깃을 인식하면 같은 비율의 투명 PNG 오버레이를 타깃 위에 표시합니다.
+카메라가 기본 v2 타깃인 `gyorido_empty_v2.mind`를 인식하면 같은 비율의 투명 PNG 오버레이를 타깃 위에 표시합니다.
+교리도 구역을 터치하면 해당 구역이 AR 하이라이트로 떠오르고 하단 설명 카드가 표시됩니다.
 
 ## 실행 방법
 
@@ -33,6 +34,17 @@ npm run build
 
 ```text
 https://cybox-digital-entertainment.github.io/WonXR/
+```
+
+빠른 테스트 URL:
+
+```text
+https://cybox-digital-entertainment.github.io/WonXR/
+https://cybox-digital-entertainment.github.io/WonXR/?target=v2
+https://cybox-digital-entertainment.github.io/WonXR/?target=v2&hotspots=1
+https://cybox-digital-entertainment.github.io/WonXR/?target=v2&debug=1&hotspots=1
+https://cybox-digital-entertainment.github.io/WonXR/?target=v2&profile=locked&lock=1
+https://cybox-digital-entertainment.github.io/WonXR/?target=v1
 ```
 
 모바일 보정 모드:
@@ -78,6 +90,7 @@ https://cybox-digital-entertainment.github.io/WonXR/?ps=0.10&rs=0.10&ss=0.10&hol
 - `miss`: MindAR missTolerance
 - `lock`: `1`이면 고정 시연 모드를 활성화
 - `profile`: `smooth`, `responsive`, `locked`
+- `target`: `v2`는 v2 패턴 종이, `v1`은 기존 빈 교리도 타깃
 
 추적 안정화 테스트 URL:
 
@@ -143,6 +156,8 @@ public/
   targets/
     gyorido_empty.png
     gyorido_empty.mind
+    gyorido_empty_v2.png
+    gyorido_empty_v2.mind
   overlays/
     gyorido_text_overlay.png
 src/
@@ -158,8 +173,9 @@ vite.config.ts
 - `gyorido_empty.png`와 `gyorido_text_overlay.png`는 `1000x1415` 동일 비율입니다.
 - 오버레이 평면은 MindAR 타깃 폭 `1`, 높이 `1.415`로 표시합니다.
 - 투명 PNG를 그대로 사용하며 리사이즈나 크롭은 하지 않습니다.
-- 현재 기본 타깃 파일은 `public/targets/gyorido_empty.mind`입니다. 코드에서는 `TARGET_MIND_PATH` 상수로 분리되어 있어 이후 `gyorido_empty_v2.mind`로 쉽게 바꿀 수 있습니다.
-- `?target=v2`를 붙이면 `public/targets/gyorido_empty_v2.mind`를 먼저 시도하고, 파일이 없으면 기본 `gyorido_empty.mind`로 fallback합니다.
+- 현재 기본 타깃 파일은 `public/targets/gyorido_empty_v2.mind`입니다. `?target=v1`을 붙이면 기존 `public/targets/gyorido_empty.mind`를 사용합니다.
+- `?target=v2` 또는 target 미지정 시 v2 타깃을 사용하고, v2 파일이 없으면 기존 `gyorido_empty.mind`로 fallback합니다.
 - 현재 `gyorido_empty.png`는 빈 공간이 많아 추적 jitter가 있을 수 있습니다. 필요하면 비대칭 마커가 추가된 `gyorido_empty_v2.png`를 새로 프린트하고 MindAR 컴파일러로 `gyorido_empty_v2.mind`를 생성해 교체합니다.
-- v0.2 precise hotspot 데이터는 `public/data/doctrine_sections.json`에 있습니다. `?hotspots=1`에서만 AR 위에 hotspot debug 사각형과 라벨을 표시합니다.
+- v0.2 precise hotspot 데이터는 `public/data/doctrine_sections.json`에 있습니다. 구역 터치 hitMesh는 기본 모드에서도 활성화되고, `?hotspots=1`에서만 AR 위에 hotspot debug 사각형과 라벨을 표시합니다.
+- 구역을 터치하면 선택 구역 위에 반투명 3D 박스와 라벨을 표시하고, 화면 하단에 설명 카드를 엽니다. 설명 내용은 교무님 검수 후 보강 예정입니다.
 - `mind-ar` 패키지는 브라우저 실행에 필요 없는 `canvas` 네이티브 빌드 의존성을 포함합니다. Windows/Node 22 환경에서 설치 실패가 날 수 있어 프로젝트 `.npmrc`에서 설치 스크립트를 건너뛰도록 설정했습니다.
