@@ -72,6 +72,8 @@ https://cybox-digital-entertainment.github.io/WonXR/reset.html
 
 Future loaded versions also include an About/Debug cache reset button, but already-stuck old clients may need `reset.html` or the cache-busted URL above.
 
+Main/Debug entry now also runs an early cache purge before the app bundle loads. The official URL may redirect once with `cacheReady=1&cacheBust=...`; this is expected and prevents Safari/PWA from keeping old WonXR caches.
+
 ## iPhone Home Screen
 
 iPhone:

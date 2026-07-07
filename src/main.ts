@@ -95,6 +95,9 @@ const SCALE_DEADBAND = 0.0015;
 const MAX_POSITION_DELTA = 0.08;
 const MAX_SCALE_DELTA = 0.1;
 const MAX_ROTATION_DELTA = 0.25;
+const ROTATION_DRIFT_GUARD_DELTA = 0.16;
+const ROTATION_DRIFT_POSITION_EPSILON = 0.035;
+const ROTATION_DRIFT_SCALE_EPSILON = 0.05;
 const LOST_HOLD_MS = 1200;
 const FADE_OUT_MS = 250;
 const RESCAN_SUPPRESS_MS = 1400;
@@ -701,6 +704,8 @@ type PoseStats = {
   profile: TrackingProfile;
   targetVersion: string;
   fallbackUsed: boolean;
+  ignoredTargetSwitchCount: number;
+  lastIgnoredTargetSwitch: string;
   holdMs: number;
   holdRemainingMs: number;
   rawCenterX: number;
@@ -713,6 +718,8 @@ type PoseStats = {
   smoothedRotationDeg: number;
   rejectedFrames: number;
   lastRejectReason: string;
+  rotationGuardCount: number;
+  lastRotationGuardReason: string;
   foundCount: number;
   lostCount: number;
   activeSectionId: string;
@@ -876,6 +883,7 @@ function getReloadMode() {
 function getCacheBustUrl(reason: 'cacheBust' | 'v' = 'cacheBust') {
   const url = new URL(import.meta.env.BASE_URL, window.location.origin);
   url.searchParams.set('mode', getReloadMode());
+  url.searchParams.set('cacheReady', '1');
   url.searchParams.set(reason, Date.now().toString());
   return url.toString();
 }
@@ -1441,6 +1449,8 @@ function updateDebugPanel(stats: PoseStats) {
     `loaded target file: ${activeTargetMindPath}`,
     `fallback used: ${stats.fallbackUsed ? 'yes' : 'no'}`,
     `recognized target index: ${Number.isFinite(recognizedTargetIndex) ? recognizedTargetIndex : '-'}`,
+    `ignored target switches: ${stats.ignoredTargetSwitchCount}`,
+    `last ignored target switch: ${stats.lastIgnoredTargetSwitch || '-'}`,
     `content mode: ${activeContentMode}`,
     `hanja image loaded: ${assetLoadStatus[TARGET_HANJA_IMAGE_PATH] ?? '-'}`,
     `hanja mind loaded: ${assetLoadStatus[TARGET_HANJA_MIND_PATH] ?? '-'}`,
@@ -1509,6 +1519,8 @@ function updateDebugPanel(stats: PoseStats) {
     `lost hold remaining: ${formatDebugMilliseconds(stats.holdRemainingMs)}`,
     `discarded outliers: ${stats.rejectedFrames}`,
     `recent outlier: ${stats.lastRejectReason || '-'}`,
+    `rotation guard count: ${stats.rotationGuardCount}`,
+    `last rotation guard: ${stats.lastRotationGuardReason || '-'}`,
     `ps/rs/ss: ${smoothingSettings.position}/${smoothingSettings.rotation}/${smoothingSettings.scale}`,
     `deadband: ${deadbandSettings.position}/${deadbandSettings.rotation}/${deadbandSettings.scale}`,
     `hold: ${stats.holdMs}ms`,
@@ -2305,6 +2317,8 @@ async function startAR() {
       profile: trackingProfile,
       targetVersion: activeTargetMode,
       fallbackUsed: activeTargetFallbackUsed,
+      ignoredTargetSwitchCount: 0,
+      lastIgnoredTargetSwitch: '',
       holdMs: lostHoldMs,
       holdRemainingMs: 0,
       rawCenterX: Number.NaN,
@@ -2317,6 +2331,8 @@ async function startAR() {
       smoothedRotationDeg: Number.NaN,
       rejectedFrames: 0,
       lastRejectReason: '',
+      rotationGuardCount: 0,
+      lastRotationGuardReason: '',
       foundCount: 0,
       lostCount: 0,
       activeSectionId: '',
@@ -2353,6 +2369,10 @@ async function startAR() {
     let lastSeenAt = 0;
     let hasWarnedLowAngle = false;
     let suppressTrackingUntil = 0;
+    let ignoredTargetSwitchCount = 0;
+    let lastIgnoredTargetSwitch = '';
+    let rotationGuardCount = 0;
+    let lastRotationGuardReason = '';
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
@@ -2402,6 +2422,10 @@ async function startAR() {
       hasLastGoodPose = false;
       lastGoodScaleScalar = 1;
       recognizedTargetIndex = Number.NaN;
+      ignoredTargetSwitchCount = 0;
+      lastIgnoredTargetSwitch = '';
+      rotationGuardCount = 0;
+      lastRotationGuardReason = '';
       overlayOpacity = 0;
       suppressTrackingUntil = now + RESCAN_SUPPRESS_MS;
       clearSelectedSection(false, reason);
@@ -2412,6 +2436,23 @@ async function startAR() {
     for (const { targetIndex, anchor } of anchors) {
       anchor.onTargetFound = () => {
         const now = performance.now();
+        if (
+          Number.isFinite(recognizedTargetIndex) &&
+          recognizedTargetIndex !== targetIndex &&
+          (hasLastGoodPose || arRoot.visible || currentAppState === 'tracking' || currentAppState === 'hold')
+        ) {
+          ignoredTargetSwitchCount += 1;
+          lastIgnoredTargetSwitch = `${recognizedTargetIndex} -> ${targetIndex}`;
+          poseStats.ignoredTargetSwitchCount = ignoredTargetSwitchCount;
+          poseStats.lastIgnoredTargetSwitch = lastIgnoredTargetSwitch;
+          console.log('WonXR ignored secondary target switch', {
+            lockedTargetIndex: recognizedTargetIndex,
+            ignoredTargetIndex: targetIndex,
+            currentAppState,
+          });
+          return;
+        }
+
         const nextContentMode = getModeForTargetIndex(targetIndex);
         activeAnchorRoot = anchor.group;
         recognizedTargetIndex = targetIndex;
@@ -2526,8 +2567,17 @@ async function startAR() {
             arRoot.position.lerp(lastGoodPosition, smoothingSettings.position);
           }
 
-          if (stableDelta.rotation > deadbandSettings.rotation) {
+          const hasSuspiciousRotationDrift =
+            stableDelta.rotation > ROTATION_DRIFT_GUARD_DELTA &&
+            stableDelta.position < ROTATION_DRIFT_POSITION_EPSILON &&
+            stableDelta.scale < ROTATION_DRIFT_SCALE_EPSILON;
+
+          if (hasSuspiciousRotationDrift) {
+            rotationGuardCount += 1;
+            lastRotationGuardReason = `rotation ${stableDelta.rotation.toFixed(3)}rad with stable p/s`;
+          } else if (stableDelta.rotation > deadbandSettings.rotation) {
             arRoot.quaternion.slerp(lastGoodQuaternion, smoothingSettings.rotation);
+            lastRotationGuardReason = '';
           }
 
           if (stableDelta.scale > deadbandSettings.scale) {
@@ -2567,6 +2617,7 @@ async function startAR() {
           arRoot.visible = false;
           isStableInitialized = false;
           hasLastGoodPose = false;
+          recognizedTargetIndex = Number.NaN;
 
           if (currentAppState !== 'lost') {
             setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
@@ -2594,6 +2645,8 @@ async function startAR() {
       const canvasExists = arContainer.querySelector('canvas') !== null;
       const warningMessages = [
         activeTargetFallbackUsed ? 'target fallback used' : '',
+        ignoredTargetSwitchCount > 0 ? `ignored secondary target switches: ${ignoredTargetSwitchCount}` : '',
+        rotationGuardCount > 0 ? `rotation drift guard active: ${rotationGuardCount}` : '',
         !videoExists ? 'no video element' : '',
         !canvasExists ? 'no canvas element' : '',
         isBottomControlsUnexpectedlyHigh() ? 'rescan button not in bottom controls' : '',
@@ -2636,12 +2689,16 @@ async function startAR() {
       poseStats.smoothedRotationDeg = getQuaternionZDegrees(visibleRoot.quaternion);
       poseStats.targetVersion = activeTargetMode;
       poseStats.fallbackUsed = activeTargetFallbackUsed;
+      poseStats.ignoredTargetSwitchCount = ignoredTargetSwitchCount;
+      poseStats.lastIgnoredTargetSwitch = lastIgnoredTargetSwitch;
       poseStats.holdRemainingMs = holdRemainingMs;
       poseStats.hitMeshCount = hitMeshes.length;
       poseStats.activeSectionId = activeSectionId;
       poseStats.activeSectionTitle = activeSectionTitle;
       poseStats.lastTouchedSectionId = lastTouchedSectionId;
       poseStats.lastTouchedSectionTitle = lastTouchedSectionTitle;
+      poseStats.rotationGuardCount = rotationGuardCount;
+      poseStats.lastRotationGuardReason = lastRotationGuardReason;
       poseStats.rawStableDeltaPosition = rawStableDelta.position;
       poseStats.rawStableDeltaRotation = rawStableDelta.rotation;
       poseStats.rawStableDeltaScale = rawStableDelta.scale;

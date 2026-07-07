@@ -19,9 +19,14 @@
   <body>
     <script>
       (() => {
+        const appBasePath = '/WonXR/';
         const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode');
+        const shouldReset = params.get('resetCache') === '1';
+        const shouldAutoPurge =
+          !shouldReset && params.get('cacheReady') !== '1' && (mode === 'main' || mode === 'debug');
 
-        if (params.get('resetCache') !== '1') {
+        if (!shouldReset && !shouldAutoPurge) {
           return;
         }
 
@@ -44,19 +49,28 @@
             );
           }
 
-          for (const storage of [window.localStorage, window.sessionStorage]) {
-            for (const key of Object.keys(storage)) {
-              if (key.toLowerCase().includes('wonxr')) {
-                storage.removeItem(key);
+          if (shouldReset) {
+            for (const storage of [window.localStorage, window.sessionStorage]) {
+              for (const key of Object.keys(storage)) {
+                if (key.toLowerCase().includes('wonxr')) {
+                  storage.removeItem(key);
+                }
               }
             }
           }
 
-          window.location.replace(`/WonXR/?mode=main&cacheBust=${Date.now()}`);
+          const nextUrl = new URL(window.location.href);
+          nextUrl.pathname = appBasePath;
+          nextUrl.searchParams.delete('resetCache');
+          nextUrl.searchParams.set('mode', mode === 'debug' ? 'debug' : 'main');
+          nextUrl.searchParams.set('cacheReady', '1');
+          nextUrl.searchParams.set('cacheBust', Date.now().toString());
+          window.location.replace(nextUrl.toString());
         };
 
         reset().catch(() => {
-          window.location.replace(`/WonXR/?mode=main&cacheBust=${Date.now()}`);
+          const fallbackMode = mode === 'debug' ? 'debug' : 'main';
+          window.location.replace(`${appBasePath}?mode=${fallbackMode}&cacheReady=1&cacheBust=${Date.now()}`);
         });
       })();
     </script>
