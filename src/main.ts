@@ -98,6 +98,11 @@ const MAX_ROTATION_DELTA = 0.25;
 const ROTATION_DRIFT_GUARD_DELTA = 0.16;
 const ROTATION_DRIFT_POSITION_EPSILON = 0.035;
 const ROTATION_DRIFT_SCALE_EPSILON = 0.05;
+const MICRO_POSE_POSITION_EPSILON = 0.008;
+const MICRO_POSE_ROTATION_EPSILON = 0.035;
+const MICRO_POSE_SCALE_EPSILON = 0.015;
+const LOST_VISUAL_GRACE_MS = 650;
+const LOST_STATUS_GRACE_MS = 360;
 const LOST_HOLD_MS = 1200;
 const FADE_OUT_MS = 250;
 const RESCAN_SUPPRESS_MS = 1400;
@@ -720,6 +725,8 @@ type PoseStats = {
   lastRejectReason: string;
   rotationGuardCount: number;
   lastRotationGuardReason: string;
+  microPoseSkipCount: number;
+  lastMicroPoseSkipReason: string;
   foundCount: number;
   lostCount: number;
   activeSectionId: string;
@@ -1521,6 +1528,8 @@ function updateDebugPanel(stats: PoseStats) {
     `recent outlier: ${stats.lastRejectReason || '-'}`,
     `rotation guard count: ${stats.rotationGuardCount}`,
     `last rotation guard: ${stats.lastRotationGuardReason || '-'}`,
+    `micro pose skips: ${stats.microPoseSkipCount}`,
+    `last micro pose skip: ${stats.lastMicroPoseSkipReason || '-'}`,
     `ps/rs/ss: ${smoothingSettings.position}/${smoothingSettings.rotation}/${smoothingSettings.scale}`,
     `deadband: ${deadbandSettings.position}/${deadbandSettings.rotation}/${deadbandSettings.scale}`,
     `hold: ${stats.holdMs}ms`,
@@ -2333,6 +2342,8 @@ async function startAR() {
       lastRejectReason: '',
       rotationGuardCount: 0,
       lastRotationGuardReason: '',
+      microPoseSkipCount: 0,
+      lastMicroPoseSkipReason: '',
       foundCount: 0,
       lostCount: 0,
       activeSectionId: '',
@@ -2373,6 +2384,8 @@ async function startAR() {
     let lastIgnoredTargetSwitch = '';
     let rotationGuardCount = 0;
     let lastRotationGuardReason = '';
+    let microPoseSkipCount = 0;
+    let lastMicroPoseSkipReason = '';
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
@@ -2426,6 +2439,8 @@ async function startAR() {
       lastIgnoredTargetSwitch = '';
       rotationGuardCount = 0;
       lastRotationGuardReason = '';
+      microPoseSkipCount = 0;
+      lastMicroPoseSkipReason = '';
       overlayOpacity = 0;
       suppressTrackingUntil = now + RESCAN_SUPPRESS_MS;
       clearSelectedSection(false, reason);
@@ -2475,9 +2490,7 @@ async function startAR() {
         isTargetFound = false;
         poseStats.lostCount += 1;
 
-        if (arRoot.visible) {
-          setAppState('hold', '인식 유지 중', 'ready', '웹버전은 교리도가 화면 안에 있을 때 가장 안정적입니다.');
-        } else {
+        if (!arRoot.visible) {
           setAppState('lost', '다시 교리도를 비춰주세요', 'waiting', '교리도 전체가 이 영역에 들어오게 비춰주세요');
         }
       };
@@ -2528,15 +2541,34 @@ async function startAR() {
               lastGoodScaleScalar,
             )
           : '';
+        const rawDisplayDelta =
+          hasLastGoodPose && isStableInitialized && arRoot.visible
+            ? getPoseDelta(targetPosition, targetQuaternion, targetScale, arRoot.position, arRoot.quaternion, arRoot.scale)
+            : undefined;
+        const shouldSkipMicroPoseRefresh =
+          rawDisplayDelta !== undefined &&
+          rawDisplayDelta.position < MICRO_POSE_POSITION_EPSILON &&
+          rawDisplayDelta.rotation < MICRO_POSE_ROTATION_EPSILON &&
+          rawDisplayDelta.scale < MICRO_POSE_SCALE_EPSILON;
 
         if (rejectReason) {
           poseStats.rejectedFrames += 1;
           poseStats.lastRejectReason = rejectReason;
         } else {
-          lastGoodPosition.copy(targetPosition);
-          lastGoodQuaternion.copy(targetQuaternion);
-          lastGoodScale.copy(targetScale);
-          lastGoodScaleScalar = Math.max(getScaleScalar(targetScale), 0.0001);
+          if (shouldSkipMicroPoseRefresh) {
+            microPoseSkipCount += 1;
+            lastMicroPoseSkipReason = `p ${rawDisplayDelta.position.toFixed(3)}, r ${rawDisplayDelta.rotation.toFixed(3)}, s ${rawDisplayDelta.scale.toFixed(3)}`;
+            lastGoodPosition.copy(arRoot.position);
+            lastGoodQuaternion.copy(arRoot.quaternion);
+            lastGoodScale.copy(arRoot.scale);
+          } else {
+            lastGoodPosition.copy(targetPosition);
+            lastGoodQuaternion.copy(targetQuaternion);
+            lastGoodScale.copy(targetScale);
+            lastMicroPoseSkipReason = '';
+          }
+
+          lastGoodScaleScalar = Math.max(getScaleScalar(lastGoodScale), 0.0001);
           hasLastGoodPose = true;
           lastSeenAt = now;
           acceptedPose = true;
@@ -2607,9 +2639,15 @@ async function startAR() {
 
         if (elapsedSinceGoodPose <= lostHoldMs) {
           arRoot.visible = true;
-          overlayOpacity = Math.max(overlayOpacity, 0.72);
+          if (elapsedSinceGoodPose <= LOST_VISUAL_GRACE_MS) {
+            overlayOpacity = Math.max(overlayOpacity, 0.98);
+          } else {
+            const fadeRange = Math.max(lostHoldMs - LOST_VISUAL_GRACE_MS, 1);
+            const fadeProgress = Math.min((elapsedSinceGoodPose - LOST_VISUAL_GRACE_MS) / fadeRange, 1);
+            overlayOpacity = Math.max(overlayOpacity, THREE.MathUtils.lerp(0.98, 0.72, fadeProgress));
+          }
 
-          if (!isTargetFound && currentAppState !== 'hold') {
+          if (!isTargetFound && elapsedSinceGoodPose > LOST_STATUS_GRACE_MS && currentAppState !== 'hold') {
             setAppState('hold', '인식 유지 중', 'ready', '웹버전은 교리도가 화면 안에 있을 때 가장 안정적입니다.');
           }
         } else {
@@ -2647,6 +2685,7 @@ async function startAR() {
         activeTargetFallbackUsed ? 'target fallback used' : '',
         ignoredTargetSwitchCount > 0 ? `ignored secondary target switches: ${ignoredTargetSwitchCount}` : '',
         rotationGuardCount > 0 ? `rotation drift guard active: ${rotationGuardCount}` : '',
+        microPoseSkipCount > 0 ? `micro pose refresh skipped: ${microPoseSkipCount}` : '',
         !videoExists ? 'no video element' : '',
         !canvasExists ? 'no canvas element' : '',
         isBottomControlsUnexpectedlyHigh() ? 'rescan button not in bottom controls' : '',
@@ -2699,6 +2738,8 @@ async function startAR() {
       poseStats.lastTouchedSectionTitle = lastTouchedSectionTitle;
       poseStats.rotationGuardCount = rotationGuardCount;
       poseStats.lastRotationGuardReason = lastRotationGuardReason;
+      poseStats.microPoseSkipCount = microPoseSkipCount;
+      poseStats.lastMicroPoseSkipReason = lastMicroPoseSkipReason;
       poseStats.rawStableDeltaPosition = rawStableDelta.position;
       poseStats.rawStableDeltaRotation = rawStableDelta.rotation;
       poseStats.rawStableDeltaScale = rawStableDelta.scale;
