@@ -2,24 +2,63 @@ import './styles.css';
 import * as THREE from 'three';
 import { MindARThree } from 'mind-ar/dist/mindar-image-three.prod.js';
 import { formatFeatureSupport, getCompatibilityReport } from './compatibility';
+import { loadDoctrineSections as loadDoctrineSectionsFromUrl, type DoctrineSection } from './ar/sectionData';
+import {
+  TARGET_ASPECT,
+  TARGET_HEIGHT,
+  TARGET_IMAGE_HEIGHT,
+  TARGET_IMAGE_WIDTH,
+  TARGET_WIDTH,
+  getTargetPlaneFromImageDimensions,
+  hotspotToPlaneRect,
+} from './ar/targetGeometry';
+import {
+  TARGET_EMPTY_GUIDE_IMAGE_PATH,
+  TARGET_HANJA_IMAGE_PATH,
+  TARGET_HANJA_MIND_PATH,
+  TARGET_IMAGE_PATH,
+  TARGET_IMAGE_V2_PATH,
+  TARGET_MIND_PATH,
+  TARGET_MIND_V2_PATH,
+  TARGET_MULTI_MIND_PATH,
+  TARGET_ORIGINAL_IMAGE_PATH,
+  TARGET_ORIGINAL_MIND_PATH,
+  getModeForTargetIndex as getModeForTargetIndexFromModes,
+  getRequestedTargetMindPath as getRequestedTargetMindPathForMode,
+  getRequestedTargetMode,
+  getScanGuideImagePath,
+  getTargetImagePath,
+  type TargetMode,
+} from './ar/targetModes';
+import {
+  readNonNegativeNumberParam as readNonNegativeQueryParam,
+  readNumberParam as readNumberQueryParam,
+  readUnitNumberParam as readUnitQueryParam,
+} from './utils/query';
 
-const TARGET_MIND_PATH = 'targets/gyorido_empty.mind';
-const TARGET_MIND_V2_PATH = 'targets/gyorido_empty_v2.mind';
-const TARGET_IMAGE_PATH = 'targets/gyorido_empty.png';
-const TARGET_EMPTY_GUIDE_IMAGE_PATH = 'targets/gyorido_empty_guide.png';
-const TARGET_IMAGE_V2_PATH = 'targets/gyorido_empty_v2.png';
-const TARGET_ORIGINAL_MIND_PATH = 'targets/gyorido_original.mind';
-const TARGET_ORIGINAL_IMAGE_PATH = 'targets/gyorido_original.png';
-const TARGET_HANJA_MIND_PATH = 'targets/gyorido_hanja.mind';
-const TARGET_HANJA_IMAGE_PATH = 'targets/gyorido_hanja.png';
-const TARGET_MULTI_MIND_PATH = 'targets/gyorido_multi.mind';
+type AppBuildInfo = {
+  version: string;
+  build: string;
+  buildTime: string;
+  commit: string;
+  note?: string;
+};
+
+declare const __WONXR_BUILD_INFO__: AppBuildInfo;
+
+const APP_BUILD: AppBuildInfo =
+  typeof __WONXR_BUILD_INFO__ === 'object'
+    ? __WONXR_BUILD_INFO__
+    : {
+        version: '0.0.0',
+        build: 'dev',
+        buildTime: 'development',
+        commit: 'development',
+        note: 'WonXR WebAR prototype',
+      };
+
 const OVERLAY_IMAGE_PATH = 'overlays/gyorido_text_overlay.png';
 const HOTSPOT_DATA_PATH = 'data/doctrine_sections.json';
-const TARGET_IMAGE_WIDTH = 1000;
-const TARGET_IMAGE_HEIGHT = 1415;
-const TARGET_ASPECT = TARGET_IMAGE_HEIGHT / TARGET_IMAGE_WIDTH;
-const TARGET_WIDTH = 1;
-const TARGET_HEIGHT = TARGET_ASPECT;
 
 const OVERLAY_SCALE_X = 1.0;
 const OVERLAY_SCALE_Y = 1.0;
@@ -39,6 +78,8 @@ const MAIN_SECTION_FILL_OPACITY = 0.16;
 const MAIN_SECTION_OUTLINE_OPACITY = 0.74;
 const ORIGINAL_TEXT_OVERLAY_OPACITY = 0.15;
 const HANJA_TEXT_OVERLAY_OPACITY = 1;
+// The Hanja scripture scan has a different content ratio/layout from the Korean/empty diagrams.
+// Preserve these target-specific overlay values unless the Hanja calibration is intentionally redone.
 const HANJA_CONTENT_SCALE_X = 0.985;
 const HANJA_CONTENT_SCALE_Y = 1.077;
 const HANJA_CONTENT_OFFSET_X = -0.002;
@@ -65,53 +106,25 @@ const TRACKING_MISS_TOLERANCE = 12;
 
 const CALIBRATION_STORAGE_KEY = 'wonxr-overlay-calibration';
 const assetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`;
+const versionedAssetUrl = (path: string) => `${assetUrl(path)}?v=${encodeURIComponent(APP_BUILD.build)}`;
 const queryParams = new URLSearchParams(window.location.search);
 const isFullDebugMode = queryParams.get('mode') === 'debug';
 const isCalibrationMode = queryParams.get('cal') === '1';
 const isDebugMode = isFullDebugMode || queryParams.get('debug') === '1';
 const isHotspotMode = isFullDebugMode || queryParams.get('hotspots') === '1';
-const targetParam = queryParams.get('target');
-const requestedTargetMode =
-  targetParam === 'v1' || targetParam === 'v2' || targetParam === 'original' || targetParam === 'hanja' || targetParam === 'multi'
-    ? targetParam
-    : 'multi';
-const multiTargetModes = ['hanja', 'original', 'v1'] as const;
+const requestedTargetMode = getRequestedTargetMode(queryParams);
 
-function getTargetImagePath(mode = requestedTargetMode) {
-  if (mode === 'multi') {
-    return TARGET_HANJA_IMAGE_PATH;
-  }
-
-  if (mode === 'hanja') {
-    return TARGET_HANJA_IMAGE_PATH;
-  }
-
-  if (mode === 'original') {
-    return TARGET_ORIGINAL_IMAGE_PATH;
-  }
-
-  if (mode === 'v1') {
-    return TARGET_IMAGE_PATH;
-  }
-
-  return TARGET_IMAGE_V2_PATH;
-}
-
-function getScanGuideImagePath(_mode = requestedTargetMode) {
-  // The pre-scan guide is a visual alignment aid only. Keep it as the empty doctrine diagram,
-  // even when the recognition target is the Hanja diagram.
-  return TARGET_EMPTY_GUIDE_IMAGE_PATH;
+function getRequestedTargetMindPath() {
+  return getRequestedTargetMindPathForMode(requestedTargetMode);
 }
 
 function getModeForTargetIndex(targetIndex: number): TargetMode {
-  if (requestedTargetMode !== 'multi' && activeTargetMode !== 'multi') {
-    return activeTargetMode;
-  }
-
-  return multiTargetModes[targetIndex] ?? 'hanja';
+  return getModeForTargetIndexFromModes(requestedTargetMode, activeTargetMode, targetIndex);
 }
 
 function getTextOverlayOpacity(mode: TargetMode) {
+  // Text and section overlays intentionally differ by target mode. Do not normalize
+  // Hanja/original/empty modes blindly; their source images carry different content.
   if (mode === 'hanja') {
     return HANJA_TEXT_OVERLAY_OPACITY;
   }
@@ -140,7 +153,6 @@ type CalibrationField = keyof OverlayCalibration;
 type ContentTransform = OverlayCalibration;
 
 type TrackingProfile = 'smooth' | 'responsive';
-type TargetMode = 'v2' | 'v1' | 'original' | 'hanja' | 'multi';
 
 type AppState = 'scan' | 'tracking' | 'hold' | 'lost';
 
@@ -152,25 +164,6 @@ type ProfileSettings = {
   rotationDeadband: number;
   scaleDeadband: number;
   lostHoldMs: number;
-};
-
-type DoctrineSection = {
-  id: string;
-  title: string;
-  subtitle?: string;
-  children?: string[];
-  content?: string;
-  color?: string;
-  hotspot: {
-    nx: number;
-    ny: number;
-    nw: number;
-    nh: number;
-  };
-};
-
-type DoctrineSectionsPayload = {
-  sections: DoctrineSection[];
 };
 
 const neutralCalibration: OverlayCalibration = {
@@ -199,16 +192,15 @@ function parseFiniteNumber(value: string | null, fallback: number) {
 }
 
 function readNumberParam(name: string, fallback: number) {
-  return parseFiniteNumber(queryParams.get(name), fallback);
+  return readNumberQueryParam(queryParams, name, fallback);
 }
 
 function readUnitNumberParam(name: string, fallback: number) {
-  const value = readNumberParam(name, fallback);
-  return Math.min(Math.max(value, 0), 1);
+  return readUnitQueryParam(queryParams, name, fallback);
 }
 
 function readNonNegativeNumberParam(name: string, fallback: number) {
-  return Math.max(readNumberParam(name, fallback), 0);
+  return readNonNegativeQueryParam(queryParams, name, fallback);
 }
 
 function readStoredCalibration() {
@@ -278,6 +270,8 @@ const hanjaContentTransform: ContentTransform = {
 };
 
 function getContentTransformForMode(mode: TargetMode): ContentTransform {
+  // Hanja uses a separate content transform because its scanned book diagram does not
+  // share the exact same crop/aspect as the previous empty/Korean target images.
   return mode === 'hanja' ? hanjaContentTransform : neutralContentTransform;
 }
 
@@ -344,31 +338,23 @@ let activeTargetWidth = TARGET_WIDTH;
 let activeTargetHeight = TARGET_HEIGHT;
 
 function setActiveTargetPlaneDimensions(width: number, height: number) {
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    activeTargetImageWidth = TARGET_IMAGE_WIDTH;
-    activeTargetImageHeight = TARGET_IMAGE_HEIGHT;
-    activeTargetAspect = TARGET_ASPECT;
-    activeTargetWidth = TARGET_WIDTH;
-    activeTargetHeight = TARGET_HEIGHT;
-    return;
-  }
-
-  activeTargetImageWidth = width;
-  activeTargetImageHeight = height;
-  activeTargetAspect = height / width;
-  activeTargetWidth = TARGET_WIDTH;
-  activeTargetHeight = activeTargetAspect;
+  const plane = getTargetPlaneFromImageDimensions(width, height);
+  activeTargetImageWidth = plane.imageWidth;
+  activeTargetImageHeight = plane.imageHeight;
+  activeTargetAspect = plane.aspect;
+  activeTargetWidth = plane.width;
+  activeTargetHeight = plane.height;
 }
 
 console.log('WonXR AR config', {
   mode: isFullDebugMode ? 'debug' : 'demo',
   targetMode: requestedTargetMode,
   targetMindPath: getRequestedTargetMindPath(),
-  targetMindUrl: assetUrl(getRequestedTargetMindPath()),
+  targetMindUrl: versionedAssetUrl(getRequestedTargetMindPath()),
   scanGuidePath: scanGuideImagePath,
-  scanGuideUrl: assetUrl(scanGuideImagePath),
+  scanGuideUrl: versionedAssetUrl(scanGuideImagePath),
   overlayPath: OVERLAY_IMAGE_PATH,
-  overlayUrl: assetUrl(OVERLAY_IMAGE_PATH),
+  overlayUrl: versionedAssetUrl(OVERLAY_IMAGE_PATH),
   calibration: {
     ox: overlayCalibration.offsetX,
     oy: overlayCalibration.offsetY,
@@ -385,7 +371,7 @@ console.log('WonXR AR config', {
     enabled: isHotspotMode,
     mainSectionOverlay,
     dataPath: HOTSPOT_DATA_PATH,
-    dataUrl: assetUrl(HOTSPOT_DATA_PATH),
+    dataUrl: versionedAssetUrl(HOTSPOT_DATA_PATH),
     hitAreaPadding,
   },
   selection: {
@@ -413,7 +399,7 @@ app.innerHTML = `
     </section>
 
     <section id="scan-guide" class="scan-guide scan-guide-layer" aria-hidden="true">
-      <img id="scan-guide-image" src="${assetUrl(scanGuideImagePath)}" alt="" />
+      <img id="scan-guide-image" src="${versionedAssetUrl(scanGuideImagePath)}" alt="" />
       <p>교리도 전체가 이 영역에 들어오게 비춰주세요</p>
     </section>
 
@@ -422,6 +408,11 @@ app.innerHTML = `
       <button id="placement-button" class="placement-button hidden" type="button">다시 스캔</button>
     </div>
     <button id="info-button" class="info-button" type="button">정보</button>
+
+    <section id="update-banner" class="update-banner hidden" role="status">
+      <span>새 버전이 있습니다. 업데이트하려면 새로고침하세요.</span>
+      <button id="update-button" type="button">업데이트</button>
+    </section>
 
     <section id="compatibility-panel" class="compatibility-panel hidden" role="alert">
       <strong id="compatibility-title">AR을 시작할 수 없습니다</strong>
@@ -468,6 +459,11 @@ app.innerHTML = `
         </div>
       </div>
       <button id="sensor-button" class="sensor-button" type="button">기기 센서 허용</button>
+      <div class="debug-cache-actions">
+        <button id="debug-update-check" class="sensor-button" type="button">업데이트 확인</button>
+        <button id="debug-cache-reset" class="sensor-button" type="button">캐시 초기화 후 새로고침</button>
+        <button id="debug-sw-update" class="sensor-button" type="button">서비스워커 업데이트</button>
+      </div>
       <pre id="debug-content"></pre>
     </section>
 
@@ -511,6 +507,9 @@ app.innerHTML = `
       <p>iPhone: Safari로 접속한 뒤 공유 버튼을 누르고 홈 화면에 추가를 선택하세요. 홈 화면 앱 모드에서 카메라가 열리지 않으면 Safari에서 직접 열어주세요.</p>
       <p>Android: Chrome 또는 Samsung Internet에서 앱 설치 또는 홈 화면에 추가를 선택하세요. Android adaptive/themed icon 지원은 런처와 브라우저 WebAPK 지원에 따라 달라집니다.</p>
       <p>iOS 아이콘 색상/틴트 효과는 iOS 설정에 의해 달라질 수 있으며, 앱은 Home Screen용 아이콘을 제공합니다.</p>
+      <h3>앱이 업데이트되지 않을 때</h3>
+      <p>새 버전이 배포되었는데도 이전 화면이 보이면 reset.html 또는 정보 화면의 캐시 초기화를 사용하세요. iPhone 홈 화면 앱에서 계속 이전 버전이 보이면 Safari에서 직접 열어 다시 시도해주세요.</p>
+      <button id="about-cache-reset" class="cache-reset-button" type="button">캐시 초기화 후 새로고침</button>
       <h3>Open source notices</h3>
       <ul>
         <li><a href="https://github.com/mrdoob/three.js/blob/dev/LICENSE" target="_blank" rel="noreferrer">Three.js - MIT License</a></li>
@@ -548,6 +547,8 @@ const startButton = requireElement<HTMLButtonElement>('#start-button');
 const bottomControls = requireElement<HTMLDivElement>('#ar-bottom-controls');
 const placementButton = requireElement<HTMLButtonElement>('#placement-button');
 const infoButton = requireElement<HTMLButtonElement>('#info-button');
+const updateBanner = requireElement<HTMLElement>('#update-banner');
+const updateButton = requireElement<HTMLButtonElement>('#update-button');
 const statusText = requireElement<HTMLSpanElement>('#status-text');
 const statusDot = requireElement<HTMLSpanElement>('#status-dot');
 const message = requireElement<HTMLParagraphElement>('#message');
@@ -562,6 +563,9 @@ const debugPanel = requireElement<HTMLElement>('#debug-panel');
 const debugToggle = requireElement<HTMLButtonElement>('#debug-toggle');
 const debugHide = requireElement<HTMLButtonElement>('#debug-hide');
 const sensorButton = requireElement<HTMLButtonElement>('#sensor-button');
+const debugUpdateCheck = requireElement<HTMLButtonElement>('#debug-update-check');
+const debugCacheReset = requireElement<HTMLButtonElement>('#debug-cache-reset');
+const debugSwUpdate = requireElement<HTMLButtonElement>('#debug-sw-update');
 const debugContent = requireElement<HTMLPreElement>('#debug-content');
 const debugOverlay = requireElement<SVGSVGElement>('#debug-overlay');
 const debugTargetCorners = requireElement<SVGPolylineElement>('#debug-target-corners');
@@ -575,6 +579,7 @@ const sectionCardContent = requireElement<HTMLParagraphElement>('#section-card-c
 const sectionCardClose = requireElement<HTMLButtonElement>('#section-card-close');
 const aboutPanel = requireElement<HTMLElement>('#about-panel');
 const aboutClose = requireElement<HTMLButtonElement>('#about-close');
+const aboutCacheReset = requireElement<HTMLButtonElement>('#about-cache-reset');
 const calibrationButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-field]');
 const calibrationActionButtons = document.querySelectorAll<HTMLButtonElement>('[data-cal-action]');
 let scanGuideFallbackUsed = false;
@@ -587,7 +592,7 @@ scanGuideImage.addEventListener('error', () => {
 
   scanGuideFallbackUsed = true;
   activeScanGuideImagePath = TARGET_EMPTY_GUIDE_IMAGE_PATH;
-  scanGuideImage.src = assetUrl(activeScanGuideImagePath);
+  scanGuideImage.src = versionedAssetUrl(activeScanGuideImagePath);
 });
 
 let mindarThree: MindARThree | undefined;
@@ -629,7 +634,16 @@ let lastOrientationChangeTime = 0;
 let lastRestartReason = '';
 let orientationRestartTimer = 0;
 let serviceWorkerStatus = 'not registered';
+let serviceWorkerRegistrationState = '-';
+let serviceWorkerControllerStatus = 'no';
+let serviceWorkerWaitingStatus = 'no';
 let manifestStatus = 'not checked';
+let latestBuildInfo: AppBuildInfo | undefined;
+let lastUpdateCheckTime = '-';
+let updateAvailable = false;
+let cacheNamesStatus = '-';
+let lastCacheResetTime = '-';
+let serviceWorkerUpdateStatus = 'not checked';
 let sensorPermissionState = 'not requested';
 let deviceOrientationLabel = '-';
 let arPosePosition = new THREE.Vector3();
@@ -790,7 +804,7 @@ async function checkDebugAssets() {
   await Promise.all(
     debugAssetPaths.map(async (path) => {
       try {
-        const response = await fetch(assetUrl(path), { method: 'HEAD' });
+        const response = await fetch(versionedAssetUrl(path), { cache: 'no-store', method: 'HEAD' });
         assetLoadStatus[path] = response.ok ? 'ok' : `failed ${response.status}`;
       } catch (error) {
         assetLoadStatus[path] = error instanceof Error ? `error: ${error.message}` : 'error';
@@ -853,6 +867,154 @@ async function checkManifestStatus() {
   }
 }
 
+function getReloadMode() {
+  // The public root has previously shown a blank page without an explicit mode.
+  // Keep ?mode=main as the normal reload target until root-mode parity is verified.
+  return isFullDebugMode ? 'debug' : 'main';
+}
+
+function getCacheBustUrl(reason: 'cacheBust' | 'v' = 'cacheBust') {
+  const url = new URL(import.meta.env.BASE_URL, window.location.origin);
+  url.searchParams.set('mode', getReloadMode());
+  url.searchParams.set(reason, Date.now().toString());
+  return url.toString();
+}
+
+function isNewerBuild(latest: AppBuildInfo) {
+  return latest.build !== APP_BUILD.build || latest.buildTime !== APP_BUILD.buildTime || latest.commit !== APP_BUILD.commit;
+}
+
+async function refreshCacheDiagnostics() {
+  serviceWorkerControllerStatus = navigator.serviceWorker?.controller ? 'yes' : 'no';
+
+  if ('caches' in window) {
+    try {
+      const cacheNames = await caches.keys();
+      cacheNamesStatus = cacheNames.length > 0 ? cacheNames.join(', ') : '(none)';
+    } catch (error) {
+      cacheNamesStatus = error instanceof Error ? `error: ${error.message}` : 'error';
+    }
+  } else {
+    cacheNamesStatus = 'unsupported';
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL);
+      serviceWorkerRegistrationState =
+        registration?.installing?.state || registration?.waiting?.state || registration?.active?.state || 'none';
+      serviceWorkerWaitingStatus = registration?.waiting ? 'yes' : 'no';
+    } catch (error) {
+      serviceWorkerRegistrationState = error instanceof Error ? `error: ${error.message}` : 'error';
+    }
+  }
+}
+
+function setUpdateBannerVisible(isVisible: boolean) {
+  updateBanner.classList.toggle('hidden', !isVisible);
+}
+
+async function checkForAppUpdate(showStatus = false) {
+  lastUpdateCheckTime = new Date().toISOString();
+
+  try {
+    const versionUrl = `${assetUrl('version.json')}?ts=${Date.now()}`;
+    const response = await fetch(versionUrl, {
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`version.json ${response.status}`);
+    }
+
+    latestBuildInfo = (await response.json()) as AppBuildInfo;
+    updateAvailable = isNewerBuild(latestBuildInfo);
+    setUpdateBannerVisible(updateAvailable);
+
+    if (showStatus) {
+      setStatus(updateAvailable ? '새 버전이 있습니다' : '최신 버전입니다', updateAvailable ? 'ready' : 'found');
+    }
+  } catch (error) {
+    serviceWorkerUpdateStatus = error instanceof Error ? `version check error: ${error.message}` : 'version check error';
+  }
+
+  await refreshCacheDiagnostics();
+}
+
+async function clearWonxrStorageAndCaches() {
+  if ('caches' in window) {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames
+        .filter((name) => name.toLowerCase().includes('wonxr') || name.includes('WonXR'))
+        .map((name) => caches.delete(name)),
+    );
+  }
+
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      registrations
+        .filter((registration) => registration.scope.includes(import.meta.env.BASE_URL) || registration.scope.includes('/WonXR/'))
+        .map((registration) => registration.unregister()),
+    );
+  }
+
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    for (const key of Object.keys(storage)) {
+      if (key.toLowerCase().includes('wonxr') || key === CALIBRATION_STORAGE_KEY) {
+        storage.removeItem(key);
+      }
+    }
+  }
+}
+
+async function resetCacheAndReload() {
+  lastCacheResetTime = new Date().toISOString();
+  serviceWorkerUpdateStatus = 'manual cache reset requested';
+  window.alert('앱 캐시를 초기화하고 새로고침합니다.');
+  await clearWonxrStorageAndCaches();
+  window.location.href = getCacheBustUrl('cacheBust');
+}
+
+function requestWaitingWorkerActivation(registration: ServiceWorkerRegistration) {
+  const waitingWorker = registration.waiting;
+
+  if (!waitingWorker) {
+    return false;
+  }
+
+  window.sessionStorage.setItem('wonxr-sw-reload-on-controllerchange', '1');
+  waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+  serviceWorkerWaitingStatus = 'yes';
+  serviceWorkerUpdateStatus = 'waiting worker asked to skip waiting';
+  return true;
+}
+
+async function requestServiceWorkerUpdate() {
+  if (!('serviceWorker' in navigator)) {
+    serviceWorkerUpdateStatus = 'unsupported';
+    return;
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration(import.meta.env.BASE_URL);
+    if (!registration) {
+      serviceWorkerUpdateStatus = 'no registration';
+      return;
+    }
+
+    await registration.update();
+    serviceWorkerUpdateStatus = requestWaitingWorkerActivation(registration) ? serviceWorkerUpdateStatus : 'update checked';
+    await refreshCacheDiagnostics();
+  } catch (error) {
+    serviceWorkerUpdateStatus = error instanceof Error ? `update error: ${error.message}` : 'update error';
+  }
+}
+
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) {
     serviceWorkerStatus = 'unsupported';
@@ -860,10 +1022,42 @@ async function registerServiceWorker() {
   }
 
   try {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (window.sessionStorage.getItem('wonxr-sw-reload-on-controllerchange') !== '1') {
+        serviceWorkerControllerStatus = navigator.serviceWorker.controller ? 'yes' : 'no';
+        return;
+      }
+
+      window.sessionStorage.removeItem('wonxr-sw-reload-on-controllerchange');
+      window.location.href = getCacheBustUrl('v');
+    });
+
     const registration = await navigator.serviceWorker.register(assetUrl('sw.js'), {
       scope: import.meta.env.BASE_URL,
+      updateViaCache: 'none',
     });
     serviceWorkerStatus = registration.active ? 'active' : 'registered';
+    serviceWorkerRegistrationState =
+      registration.installing?.state || registration.waiting?.state || registration.active?.state || 'registered';
+    requestWaitingWorkerActivation(registration);
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+
+      if (!newWorker) {
+        return;
+      }
+
+      serviceWorkerUpdateStatus = 'update found';
+      newWorker.addEventListener('statechange', () => {
+        serviceWorkerRegistrationState = newWorker.state;
+
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          requestWaitingWorkerActivation(registration);
+        }
+      });
+    });
+    await registration.update();
+    await refreshCacheDiagnostics();
   } catch (error) {
     serviceWorkerStatus = error instanceof Error ? `error: ${error.message}` : 'error';
   }
@@ -1103,26 +1297,6 @@ function assertArLayersCreated() {
   }
 }
 
-function getRequestedTargetMindPath() {
-  if (requestedTargetMode === 'v1') {
-    return TARGET_MIND_PATH;
-  }
-
-  if (requestedTargetMode === 'original') {
-    return TARGET_ORIGINAL_MIND_PATH;
-  }
-
-  if (requestedTargetMode === 'hanja') {
-    return TARGET_HANJA_MIND_PATH;
-  }
-
-  if (requestedTargetMode === 'multi') {
-    return TARGET_MULTI_MIND_PATH;
-  }
-
-  return TARGET_MIND_V2_PATH;
-}
-
 async function resolveTargetMindPath(): Promise<{ path: string; mode: TargetMode }> {
   const requestedTargetMindPath = getRequestedTargetMindPath();
   activeTargetFallbackUsed = false;
@@ -1132,7 +1306,7 @@ async function resolveTargetMindPath(): Promise<{ path: string; mode: TargetMode
   }
 
   try {
-    const response = await fetch(assetUrl(requestedTargetMindPath), { method: 'HEAD' });
+    const response = await fetch(versionedAssetUrl(requestedTargetMindPath), { cache: 'no-store', method: 'HEAD' });
 
     if (response.ok) {
       return { path: requestedTargetMindPath, mode: requestedTargetMode };
@@ -1147,14 +1321,7 @@ async function resolveTargetMindPath(): Promise<{ path: string; mode: TargetMode
 }
 
 async function loadDoctrineSections() {
-  const response = await fetch(assetUrl(HOTSPOT_DATA_PATH));
-
-  if (!response.ok) {
-    throw new Error(`Failed to load hotspot data: ${response.status}`);
-  }
-
-  const payload = (await response.json()) as DoctrineSectionsPayload;
-  return Array.isArray(payload.sections) ? payload.sections : [];
+  return loadDoctrineSectionsFromUrl(versionedAssetUrl(HOTSPOT_DATA_PATH));
 }
 
 function getScaleScalar(scale: THREE.Vector3) {
@@ -1385,9 +1552,26 @@ function updateDebugPanel(stats: PoseStats) {
     formatFeatureSupport(compatibilityReport.features),
     '',
     '[pwa]',
+    `current app version: ${APP_BUILD.version}`,
+    `current build: ${APP_BUILD.build}`,
+    `current buildTime: ${APP_BUILD.buildTime}`,
+    `current commit: ${APP_BUILD.commit}`,
+    `latest version: ${latestBuildInfo?.version ?? '-'}`,
+    `latest build: ${latestBuildInfo?.build ?? '-'}`,
+    `latest buildTime: ${latestBuildInfo?.buildTime ?? '-'}`,
+    `latest commit: ${latestBuildInfo?.commit ?? '-'}`,
+    `update available: ${updateAvailable ? 'yes' : 'no'}`,
+    `last update check: ${lastUpdateCheckTime}`,
+    `last cache reset: ${lastCacheResetTime}`,
     `display mode: ${getDisplayMode()}`,
     `ios standalone: ${getIosStandalone() ? 'yes' : 'no'}`,
     `service worker: ${serviceWorkerStatus}`,
+    `service worker supported: ${'serviceWorker' in navigator ? 'yes' : 'no'}`,
+    `service worker controller: ${serviceWorkerControllerStatus}`,
+    `service worker registration state: ${serviceWorkerRegistrationState}`,
+    `service worker waiting: ${serviceWorkerWaitingStatus}`,
+    `service worker update: ${serviceWorkerUpdateStatus}`,
+    `cache names: ${cacheNamesStatus}`,
     `manifest: ${manifestStatus}`,
     '',
     '[camera/rendering]',
@@ -1471,7 +1655,7 @@ function updateDebugCorners(
 
 async function loadOverlayTexture() {
   const loader = new THREE.TextureLoader();
-  const texture = await loader.loadAsync(assetUrl(OVERLAY_IMAGE_PATH));
+  const texture = await loader.loadAsync(versionedAssetUrl(OVERLAY_IMAGE_PATH));
   texture.encoding = THREE.sRGBEncoding;
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
@@ -1492,7 +1676,7 @@ function loadImageDimensions(path: string): Promise<{ width: number; height: num
     };
 
     image.onerror = () => reject(new Error(`Failed to load target image: ${path}`));
-    image.src = assetUrl(path);
+    image.src = versionedAssetUrl(path);
   });
 }
 
@@ -1551,11 +1735,7 @@ function createLabelSprite(text: string, color: THREE.Color) {
 }
 
 function getSectionRect(section: DoctrineSection, padding = 0) {
-  const width = section.hotspot.nw * activeTargetWidth + padding * 2;
-  const height = section.hotspot.nh * activeTargetHeight + padding * 2;
-  const centerX = (section.hotspot.nx + section.hotspot.nw / 2 - 0.5) * activeTargetWidth;
-  const centerY = (0.5 - (section.hotspot.ny + section.hotspot.nh / 2)) * activeTargetHeight;
-  return { centerX, centerY, width, height };
+  return hotspotToPlaneRect(section.hotspot, activeTargetWidth, activeTargetHeight, padding);
 }
 
 function getSectionColor(section: DoctrineSection) {
@@ -2067,8 +2247,8 @@ async function startAR() {
     activeTargetMindPath = targetMind.path;
     const targetImageInfo = await applyActiveTargetPlaneFromImage(activeTargetMode);
     activeContentMode = activeTargetMode === 'multi' ? getModeForTargetIndex(0) : activeTargetMode;
-    activeScanGuideImagePath = getScanGuideImagePath(activeTargetMode);
-    scanGuideImage.src = assetUrl(activeScanGuideImagePath);
+    activeScanGuideImagePath = getScanGuideImagePath();
+    scanGuideImage.src = versionedAssetUrl(activeScanGuideImagePath);
     textOverlayOpacity = getTextOverlayOpacity(activeContentMode);
     console.log('WonXR target image plane resolved', {
       targetImagePath: targetImageInfo.path,
@@ -2086,7 +2266,7 @@ async function startAR() {
 
     mindarThree = new MindARThree({
       container: arContainer,
-      imageTargetSrc: assetUrl(targetMind.path),
+      imageTargetSrc: versionedAssetUrl(targetMind.path),
       uiLoading: 'no',
       uiScanning: 'no',
       uiError: 'no',
@@ -2177,6 +2357,9 @@ async function startAR() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputEncoding = THREE.sRGBEncoding;
 
+    // This WebAR build is image-target AR. The root follows the visible MindAR target
+    // with smoothing and only holds briefly on target loss; true world anchoring is for
+    // a future native/ARCore implementation, not this iPhone Safari web version.
     arRoot.visible = false;
     arRootRef = arRoot;
     scene.add(arRoot);
@@ -2556,6 +2739,13 @@ sectionCardClose.addEventListener('click', () => {
 infoButton.addEventListener('click', openAboutPanel);
 compatibilityInfoButton.addEventListener('click', openAboutPanel);
 aboutClose.addEventListener('click', closeAboutPanel);
+aboutCacheReset.addEventListener('click', () => {
+  void resetCacheAndReload();
+});
+
+updateButton.addEventListener('click', () => {
+  void resetCacheAndReload();
+});
 
 debugToggle.addEventListener('click', () => {
   debugPanel.classList.toggle('collapsed');
@@ -2572,6 +2762,18 @@ debugFab.addEventListener('click', () => {
 
 sensorButton.addEventListener('click', () => {
   void requestDeviceSensorPermission();
+});
+
+debugUpdateCheck.addEventListener('click', () => {
+  void checkForAppUpdate(true);
+});
+
+debugCacheReset.addEventListener('click', () => {
+  void resetCacheAndReload();
+});
+
+debugSwUpdate.addEventListener('click', () => {
+  void requestServiceWorkerUpdate();
 });
 
 window.addEventListener('resize', () => {
@@ -2606,6 +2808,8 @@ applyInitialCompatibilityGate();
 void checkDebugAssets();
 void checkManifestStatus();
 void registerServiceWorker();
+void checkForAppUpdate(false);
+void refreshCacheDiagnostics();
 
 startButton.addEventListener('click', () => {
   void startAR();

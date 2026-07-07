@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>WonXR cache reset</title>
+    <style>
+      :root {
+        color: #fff;
+        background: #111418;
+        font-family: "WON Dotum", "한둥근돋움", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        place-items: center;
+      }
+
+      main {
+        width: min(520px, calc(100vw - 32px));
+        padding: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.35rem;
+      }
+
+      p {
+        color: rgba(255, 255, 255, 0.74);
+        line-height: 1.55;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WonXR 캐시 초기화 중...</h1>
+      <p id="status">서비스워커와 앱 캐시를 정리하고 있습니다.</p>
+    </main>
+    <script>
+      (async () => {
+        const status = document.getElementById('status');
+        const setStatus = (message) => {
+          status.textContent = message;
+        };
+
+        try {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(
+              registrations
+                .filter((registration) => registration.scope.includes('/WonXR/'))
+                .map((registration) => registration.unregister()),
+            );
+          }
+
+          if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(
+              cacheNames
+                .filter((name) => name.toLowerCase().includes('wonxr') || name.includes('WonXR'))
+                .map((name) => caches.delete(name)),
+            );
+          }
+
+          for (const storage of [window.localStorage, window.sessionStorage]) {
+            for (const key of Object.keys(storage)) {
+              if (key.toLowerCase().includes('wonxr')) {
+                storage.removeItem(key);
+              }
+            }
+          }
+
+          setStatus('정리 완료. 새 버전으로 이동합니다.');
+        } catch (error) {
+          setStatus(`정리 중 오류가 발생했습니다. 새로고침을 시도합니다. ${error?.message || ''}`);
+        } finally {
+          window.location.replace(`/WonXR/?mode=main&cacheBust=${Date.now()}`);
+        }
+      })();
+    </script>
+  </body>
+</html>

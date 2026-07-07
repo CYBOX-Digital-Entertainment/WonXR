@@ -51,6 +51,7 @@ button {
 .calibration-panel,
 .debug-panel,
 .debug-fab,
+.update-banner,
 .section-card,
 .about-panel,
 .compatibility-panel {
@@ -72,6 +73,7 @@ button {
   .calibration-panel,
   .debug-panel,
   .debug-fab,
+  .update-banner,
   .section-card,
   .about-panel,
   .compatibility-panel {
@@ -344,6 +346,47 @@ h1 {
   pointer-events: auto;
 }
 
+.update-banner {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(env(safe-area-inset-bottom) + 128px);
+  z-index: 34;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+
+.update-banner.hidden {
+  display: none;
+}
+
+.update-banner button,
+.cache-reset-button {
+  min-height: 34px;
+  border: 1px solid var(--glass-highlight);
+  border-radius: 999px;
+  color: #07120d;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.42), transparent 44%),
+    linear-gradient(180deg, #ffe76a, var(--won-gold));
+  font-size: 0.78rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.update-banner button {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+}
+
 .status-panel {
   position: absolute;
   left: 16px;
@@ -525,6 +568,17 @@ h1 {
   margin: 0 0 8px;
 }
 
+.debug-cache-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.debug-cache-actions .sensor-button {
+  margin: 0;
+}
+
 .debug-panel pre {
   max-height: calc(45dvh - 54px);
   margin: 0;
@@ -654,6 +708,12 @@ h1 {
 
 .about-panel a {
   color: #b8c7ff;
+}
+
+.cache-reset-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 12px;
 }
 
 .compatibility-panel strong {

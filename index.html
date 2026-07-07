@@ -17,6 +17,49 @@
     <title>WonXR 교리도 AR</title>
   </head>
   <body>
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.get('resetCache') !== '1') {
+          return;
+        }
+
+        const reset = async () => {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(
+              registrations
+                .filter((registration) => registration.scope.includes('/WonXR/'))
+                .map((registration) => registration.unregister()),
+            );
+          }
+
+          if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(
+              cacheNames
+                .filter((name) => name.toLowerCase().includes('wonxr') || name.includes('WonXR'))
+                .map((name) => caches.delete(name)),
+            );
+          }
+
+          for (const storage of [window.localStorage, window.sessionStorage]) {
+            for (const key of Object.keys(storage)) {
+              if (key.toLowerCase().includes('wonxr')) {
+                storage.removeItem(key);
+              }
+            }
+          }
+
+          window.location.replace(`/WonXR/?mode=main&cacheBust=${Date.now()}`);
+        };
+
+        reset().catch(() => {
+          window.location.replace(`/WonXR/?mode=main&cacheBust=${Date.now()}`);
+        });
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
