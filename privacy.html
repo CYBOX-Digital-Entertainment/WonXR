@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#111418" />
+    <meta name="robots" content="index,follow" />
+    <title>WonXR 개인정보처리방침</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --won-gold: #f2c400;
+        --page-bg: #0b0d10;
+        --border: rgba(255, 255, 255, 0.16);
+        --text: rgba(255, 255, 255, 0.96);
+        --muted: rgba(255, 255, 255, 0.74);
+        --font-won: "WON Dotum", "한둥근돋움", "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR",
+          system-ui, sans-serif;
+        font-family: var(--font-won);
+        background: var(--page-bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(76, 57, 115, 0.3), transparent 360px),
+          var(--page-bg);
+      }
+
+      a {
+        color: #92b4ff;
+        text-underline-offset: 3px;
+      }
+
+      header,
+      main,
+      footer {
+        width: min(780px, calc(100% - 32px));
+        margin-inline: auto;
+      }
+
+      header {
+        padding: max(44px, env(safe-area-inset-top)) 0 24px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+        color: var(--won-gold);
+        font-size: 0.88rem;
+        font-weight: 700;
+      }
+
+      .brand::before {
+        width: 10px;
+        height: 10px;
+        border: 2px solid currentColor;
+        border-radius: 50%;
+        content: "";
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2rem, 8vw, 3rem);
+        line-height: 1.18;
+        letter-spacing: 0;
+      }
+
+      .summary {
+        max-width: 650px;
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+        line-height: 1.75;
+      }
+
+      main {
+        padding-bottom: 28px;
+      }
+
+      section {
+        padding: 24px 0;
+        border-top: 1px solid var(--border);
+      }
+
+      h2 {
+        margin: 0 0 14px;
+        font-size: 1.15rem;
+        letter-spacing: 0;
+      }
+
+      p,
+      li {
+        color: var(--muted);
+        line-height: 1.75;
+      }
+
+      p {
+        margin: 10px 0;
+      }
+
+      ul {
+        margin: 10px 0;
+        padding-left: 22px;
+      }
+
+      li + li {
+        margin-top: 8px;
+      }
+
+      strong {
+        color: var(--text);
+      }
+
+      .notice {
+        margin: 8px 0 16px;
+        padding: 18px;
+        border: 1px solid rgba(242, 196, 0, 0.32);
+        border-radius: 8px;
+        background: rgba(242, 196, 0, 0.08);
+      }
+
+      .meta {
+        display: grid;
+        grid-template-columns: minmax(110px, 0.32fr) 1fr;
+        gap: 10px 18px;
+        margin: 0;
+      }
+
+      .meta dt {
+        color: var(--muted);
+      }
+
+      .meta dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      footer {
+        padding: 4px 0 max(40px, env(safe-area-inset-bottom));
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      @media (max-width: 520px) {
+        header,
+        main,
+        footer {
+          width: min(100% - 24px, 780px);
+        }
+
+        section {
+          padding: 20px 0;
+        }
+
+        .meta {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
+
+        .meta dd + dt {
+          margin-top: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">WonXR</div>
+      <h1>개인정보처리방침</h1>
+      <p class="summary">
+        WonXR은 원불교 교리도를 인식하여 증강현실 콘텐츠를 보여주는 Android 앱입니다. 이 방침은
+        앱이 카메라와 관련 정보를 어떻게 이용하는지 설명합니다.
+      </p>
+    </header>
+
+    <main>
+      <section aria-labelledby="overview-title">
+        <h2 id="overview-title">1. 기본 정보</h2>
+        <dl class="meta">
+          <dt>앱 이름</dt>
+          <dd>WonXR</dd>
+          <dt>패키지명</dt>
+          <dd>com.imasterprox.wonxr</dd>
+          <dt>개발자</dt>
+          <dd>iMasterProX / Song MinSoo</dd>
+          <dt>시행일</dt>
+          <dd>2026년 7월 24일</dd>
+        </dl>
+      </section>
+
+      <section aria-labelledby="camera-title">
+        <h2 id="camera-title">2. 카메라 접근과 이용 목적</h2>
+        <div class="notice">
+          <strong>카메라 영상은 개발자 서버로 업로드하거나 개발자가 별도로 저장하지 않습니다.</strong>
+        </div>
+        <p>
+          WonXR은 교리도 이미지를 인식하고 증강현실 오브젝트를 표시하기 위해 실행 중 카메라 권한을
+          사용합니다. 카메라 영상은 AR 인식과 화면 표시를 위해 기기에서 실시간으로 처리되며, 앱에는
+          촬영·녹화·사진 저장 기능이 없습니다.
+        </p>
+        <p>
+          카메라 권한을 허용하지 않으면 핵심 AR 기능을 사용할 수 없습니다. 사용자는 Android 설정에서
+          언제든지 카메라 권한을 해제할 수 있습니다.
+        </p>
+      </section>
+
+      <section aria-labelledby="collection-title">
+        <h2 id="collection-title">3. 개발자가 직접 수집하는 정보</h2>
+        <p>WonXR 개발자는 앱을 통해 다음 정보를 직접 수집하거나 개발자 서버에 저장하지 않습니다.</p>
+        <ul>
+          <li>이름, 이메일 주소, 전화번호 및 계정 정보</li>
+          <li>정확한 위치 또는 대략적인 위치</li>
+          <li>연락처, 사진, 동영상, 음성 및 기기 내 파일</li>
+          <li>결제 정보, 광고 식별자 및 사용자 행동 분석 정보</li>
+          <li>사용자가 카메라로 비추는 영상</li>
+        </ul>
+        <p>
+          앱은 회원가입이나 로그인을 제공하지 않으며 광고 SDK, Firebase Analytics 또는 별도의 사용자
+          추적 SDK를 사용하지 않습니다.
+        </p>
+      </section>
+
+      <section aria-labelledby="arcore-title">
+        <h2 id="arcore-title">4. Google Play Services for AR(ARCore)</h2>
+        <p>
+          WonXR의 증강현실 기능은 Google이 제공하는 Google Play Services for AR(ARCore)을 사용하며,
+          해당 서비스에는 Google 개인정보처리방침이 적용됩니다.
+        </p>
+        <p>Google의 ARCore 안내에 따르면 ARCore는 서비스 운영 과정에서 다음 정보를 자동으로 처리할 수 있습니다.</p>
+        <ul>
+          <li>Google 계정 로그인 상태에 따른 사용자 식별자 또는 기기 식별자</li>
+          <li>배터리, 로딩 시간, 지연 시간, 프레임 속도 등의 성능 및 진단 정보</li>
+          <li>ARCore API 호출 정보와 앱의 AR 기능 사용 정보</li>
+        </ul>
+        <p>
+          Google은 이러한 정보를 ARCore 사용 분석, 정상 작동 확인, 오류 진단 및 AR 환경 개선을 위해
+          처리한다고 안내하고 있습니다. ARCore가 수집하는 정보는 전송 중 암호화됩니다. WonXR은
+          ARCore Cloud Anchors 및 Geospatial API를 사용하지 않으며 위치 권한을 요청하지 않습니다.
+        </p>
+        <ul>
+          <li>
+            <a href="https://developers.google.com/ar/develop/privacy-requirements" rel="noopener noreferrer">
+              ARCore 사용자 개인정보 보호 요건
+            </a>
+          </li>
+          <li>
+            <a href="https://developers.google.com/ar/develop/play-safety-label" rel="noopener noreferrer">
+              ARCore의 Google Play 데이터 보안 안내
+            </a>
+          </li>
+          <li>
+            <a href="https://policies.google.com/privacy" rel="noopener noreferrer">
+              Google 개인정보처리방침
+            </a>
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="network-title">
+        <h2 id="network-title">5. 인터넷 접근과 외부 링크</h2>
+        <p>
+          인터넷 권한은 ARCore 설치·업데이트 및 지원 상태 확인과, 사용자가 직접 선택한 경우 WonXR
+          웹버전 또는 관련 웹페이지를 외부 브라우저로 여는 데 사용될 수 있습니다. 앱은 자체 서버로
+          개인정보나 카메라 영상을 전송하지 않습니다.
+        </p>
+        <p>외부 웹사이트를 열면 해당 사이트의 개인정보처리방침과 이용 조건이 적용됩니다.</p>
+      </section>
+
+      <section aria-labelledby="local-title">
+        <h2 id="local-title">6. 기기 내 저장, 보유 기간 및 삭제</h2>
+        <p>
+          앱은 작동에 필요한 일부 설정값을 기기 내부의 앱 전용 저장 공간에 보관할 수 있습니다. 이
+          설정값은 개발자 서버로 전송되지 않으며, 사용자가 앱 데이터를 삭제하거나 앱을 제거하면 함께
+          삭제됩니다.
+        </p>
+        <p>
+          개발자가 운영하는 서버에는 사용자 계정이나 개인정보가 저장되지 않으므로 별도의 계정 삭제
+          절차는 없습니다. ARCore가 처리하는 정보의 보유 및 삭제는 Google의 정책에 따릅니다.
+        </p>
+      </section>
+
+      <section aria-labelledby="security-title">
+        <h2 id="security-title">7. 정보 보호</h2>
+        <p>
+          WonXR은 앱 기능에 필요한 권한만 요청하고 카메라 접근은 사용자가 앱을 실행하여 AR 기능을
+          사용하는 동안에만 이루어지도록 구성합니다. 개발자가 직접 운영하는 개인정보 수집 서버는
+          없습니다.
+        </p>
+      </section>
+
+      <section aria-labelledby="changes-title">
+        <h2 id="changes-title">8. 방침 변경</h2>
+        <p>
+          앱 기능, 사용하는 SDK 또는 관련 법령과 정책이 변경되면 이 방침을 수정할 수 있습니다. 중요한
+          변경이 있을 경우 이 페이지의 시행일을 갱신하여 알립니다.
+        </p>
+      </section>
+
+      <section aria-labelledby="contact-title">
+        <h2 id="contact-title">9. 문의</h2>
+        <p>개인정보 보호와 관련한 문의는 아래 연락처로 보내주시기 바랍니다.</p>
+        <dl class="meta">
+          <dt>개발자</dt>
+          <dd>iMasterProX / Song MinSoo</dd>
+          <dt>이메일</dt>
+          <dd><a href="mailto:imasterprox@gmail.com">imasterprox@gmail.com</a></dd>
+        </dl>
+      </section>
+    </main>
+
+    <footer>© 2026 iMasterProX. WonXR 개인정보처리방침.</footer>
+  </body>
+</html>

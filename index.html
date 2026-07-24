@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#111418" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="WonXR" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/WonXR/manifest.webmanifest" />
+    <link rel="icon" href="/WonXR/favicon.ico" sizes="any" />
+    <link rel="icon" href="/WonXR/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/WonXR/icons/icon-16.png" sizes="16x16" type="image/png" />
+    <link rel="icon" href="/WonXR/icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href="/WonXR/icons/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="apple-touch-icon" href="/WonXR/icons/apple-touch-icon.png" />
+    <title>WonXR 교리도 AR</title>
+    <script type="module" crossorigin src="/WonXR/assets/index-Bjw6PrGR.js"></script>
+    <link rel="stylesheet" crossorigin href="/WonXR/assets/index-CINPhp6G.css">
+  </head>
+  <body>
+    <script>
+      (() => {
+        const appBasePath = '/WonXR/';
+        const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode');
+        const shouldReset = params.get('resetCache') === '1';
+        const shouldAutoPurge =
+          !shouldReset && params.get('cacheReady') !== '1' && (mode === 'main' || mode === 'debug');
+
+        if (!shouldReset && !shouldAutoPurge) {
+          return;
+        }
+
+        const reset = async () => {
+          if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(
+              registrations
+                .filter((registration) => registration.scope.includes('/WonXR/'))
+                .map((registration) => registration.unregister()),
+            );
+          }
+
+          if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            await Promise.all(
+              cacheNames
+                .filter((name) => name.toLowerCase().includes('wonxr') || name.includes('WonXR'))
+                .map((name) => caches.delete(name)),
+            );
+          }
+
+          if (shouldReset) {
+            for (const storage of [window.localStorage, window.sessionStorage]) {
+              for (const key of Object.keys(storage)) {
+                if (key.toLowerCase().includes('wonxr')) {
+                  storage.removeItem(key);
+                }
+              }
+            }
+          }
+
+          const nextUrl = new URL(window.location.href);
+          nextUrl.pathname = appBasePath;
+          nextUrl.searchParams.delete('resetCache');
+          nextUrl.searchParams.set('mode', mode === 'debug' ? 'debug' : 'main');
+          nextUrl.searchParams.set('cacheReady', '1');
+          nextUrl.searchParams.set('cacheBust', Date.now().toString());
+          window.location.replace(nextUrl.toString());
+        };
+
+        reset().catch(() => {
+          const fallbackMode = mode === 'debug' ? 'debug' : 'main';
+          window.location.replace(`${appBasePath}?mode=${fallbackMode}&cacheReady=1&cacheBust=${Date.now()}`);
+        });
+      })();
+    </script>
+    <div id="app"></div>
+  </body>
+</html>
